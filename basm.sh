@@ -7,6 +7,48 @@ prog="$0"
 infile="${1:-}"
 outfile="${2:-a.out}"
 
+if [ "$infile" = "test" ]; then
+  echo "running tests"
+  test_dir="tests"
+  failed_tests=0
+  for test_file in "$test_dir"/*.asm; do
+    if [ ! -f "$test_file" ]; then
+      continue
+    fi
+    test_name=$(basename "$test_file" .asm)
+    executable="$test_dir/$test_name"
+    echo "  testing $test_name"
+
+    # Assemble the test file
+    if ! bash "$prog" "$test_file" "$executable"; then
+      echo "  [FAIL] $test_name: asm failed."
+      failed_tests=$((failed_tests + 1))
+      continue
+    fi
+
+    # Run the executable
+    if ! "$executable"; then
+      echo "  [FAIL] $test_name: Exited with non-zero status code ($?)."
+      failed_tests=$((failed_tests + 1))
+      echo "         executable kept at $executable"
+      continue
+    fi
+
+    echo "  [PASS] $test_name"
+    rm -f "$executable"
+  done
+
+  if [ "$failed_tests" -gt 0 ]; then
+    echo
+    echo "$failed_tests test(s) failed."
+    exit 1
+  else
+    echo
+    echo "all tests passed. good job."
+    exit 0
+  fi
+fi
+
 if [ -z "$infile" ]; then
   echo "usage: $prog input.asm output" >&2
   exit 1
@@ -239,7 +281,7 @@ header_hex+="$(u64le $filesz)"
 header_hex+="$(u64le $filesz)"
 header_hex+="$(u64le 0x200000)"
 
-echo -n "$header_hex" | xxd -r -p > "$tmpf"
+echo -n "$header_hex" | xxd -r -p >"$tmpf"
 
 cur_size=$(stat -c%s "$tmpf")
 if ((cur_size > file_text_off)); then
@@ -249,8 +291,8 @@ fi
 pad=$((file_text_off - cur_size))
 dd if=/dev/zero bs=1 count=$pad 2>/dev/null >>"$tmpf"
 
-echo -n "$text_hex" | xxd -r -p >> "$tmpf"
-echo -n "$data_bytes" | xxd -r -p >> "$tmpf"
+echo -n "$text_hex" | xxd -r -p >>"$tmpf"
+echo -n "$data_bytes" | xxd -r -p >>"$tmpf"
 
 actual_size=$(stat -c%s "$tmpf")
 if [ "$actual_size" -ne "$filesz" ]; then
