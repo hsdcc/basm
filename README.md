@@ -1,2 +1,3 @@
 # basm
-assembly compiler/linker in pure bash, doesnt even use cat.
+
+assembly compiler/linker in pure bash, doesn't even use cat.
