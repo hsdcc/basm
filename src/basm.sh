@@ -19,6 +19,11 @@ if [ "$infile" = "test" ]; then
     executable="$test_dir/$test_name"
     echo "  testing $test_name"
 
+    expected_exit_code=0
+    if grep -q '; expect:' "$test_file"; then
+      expected_exit_code=$(grep '; expect:' "$test_file" | head -n 1 | awk '{print $3}')
+    fi
+
     # Assemble the test file
     if ! bash "$prog" "$test_file" "$executable"; then
       echo "  [FAIL] $test_name: asm failed."
@@ -27,8 +32,12 @@ if [ "$infile" = "test" ]; then
     fi
 
     # Run the executable
-    if ! "$executable"; then
-      echo "  [FAIL] $test_name: Exited with non-zero status code ($?)."
+    set +e
+    "$executable"
+    actual_exit_code=$?
+    set -e
+    if [ "$actual_exit_code" -ne "$expected_exit_code" ]; then
+      echo "  [FAIL] $test_name: Exited with status code $actual_exit_code, expected $expected_exit_code."
       failed_tests=$((failed_tests + 1))
       echo "         executable kept at $executable"
       continue
@@ -145,11 +154,22 @@ for raw in "${lines[@]}"; do
     text_ins+=("$line")
     case "$line" in
     syscall) text_bytes_len=$((text_bytes_len + 2)) ;;
+    nop) text_bytes_len=$((text_bytes_len + 1)) ;;
     "xor rdi, rdi") text_bytes_len=$((text_bytes_len + 3)) ;;
     ret) text_bytes_len=$((text_bytes_len + 1)) ;;
+    "push rax") text_bytes_len=$((text_bytes_len + 1)) ;;
+    "pop rdi") text_bytes_len=$((text_bytes_len + 1)) ;;
     "mov rsi,"*) text_bytes_len=$((text_bytes_len + 10)) ;;
     "mov rax,"*) text_bytes_len=$((text_bytes_len + 7)) ;;
-    "mov rdi,"*) text_bytes_len=$((text_bytes_len + 7)) ;;
+    "mov rdi,"*)
+      if [[ "$line" == "mov rdi, rax" ]]; then
+        text_bytes_len=$((text_bytes_len + 3))
+      else
+        text_bytes_len=$((text_bytes_len + 7))
+      fi
+      ;;
+    "add rax,"*) text_bytes_len=$((text_bytes_len + 7)) ;;
+    "sub rax,"*) text_bytes_len=$((text_bytes_len + 7)) ;;
     "mov rdx,"*) text_bytes_len=$((text_bytes_len + 7)) ;;
     *)
       echo "unsupported instruction: $line" >&2
@@ -178,8 +198,11 @@ text_hex=""
 for line in "${text_ins[@]}"; do
   case "$line" in
   syscall) text_hex+="0f05" ;;
+  nop) text_hex+="90" ;;
   "xor rdi, rdi") text_hex+="4831ff" ;;
   ret) text_hex+="c3" ;;
+  "push rax") text_hex+="50" ;;
+  "pop rdi") text_hex+="5f" ;;
   "mov rsi,"*)
     op="48be"
     arg="${line#mov rsi, }"
@@ -214,18 +237,46 @@ for line in "${text_ins[@]}"; do
     text_hex+="48c7c0$(u32le $val)"
     ;;
   "mov rdi,"*)
-    arg="${line#mov rdi, }"
+    if [[ "$line" == "mov rdi, rax" ]]; then
+      text_hex+="4889c7"
+    else
+      arg="${line#mov rdi, }"
+      if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+        val=$((16#${BASH_REMATCH[1]}))
+      elif [[ "$arg" =~ ^[0-9]+$ ]]; then
+        val=$((arg))
+      elif [[ -n "${equs[$arg]:-}" ]]; then
+        val=${equs[$arg]}
+      else
+        echo "unknown immediate $arg" >&2
+        exit 1
+      fi
+      text_hex+="48c7c7$(u32le $val)"
+    fi
+    ;;
+  "add rax,"*)
+    arg="${line#add rax, }"
     if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
       val=$((16#${BASH_REMATCH[1]}))
     elif [[ "$arg" =~ ^[0-9]+$ ]]; then
       val=$((arg))
-    elif [[ -n "${equs[$arg]:-}" ]]; then
-      val=${equs[$arg]}
     else
       echo "unknown immediate $arg" >&2
       exit 1
     fi
-    text_hex+="48c7c7$(u32le $val)"
+    text_hex+="4881c0$(u32le $val)"
+    ;;
+  "sub rax,"*)
+    arg="${line#sub rax, }"
+    if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+      val=$((16#${BASH_REMATCH[1]}))
+    elif [[ "$arg" =~ ^[0-9]+$ ]]; then
+      val=$((arg))
+    else
+      echo "unknown immediate $arg" >&2
+      exit 1
+    fi
+    text_hex+="4881e8$(u32le $val)"
     ;;
   "mov rdx,"*)
     arg="${line#mov rdx, }"
