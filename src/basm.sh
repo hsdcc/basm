@@ -85,6 +85,15 @@ mapfile -t lines < <(sed 's/\r$//' "$infile")
 declare -A labels
 declare -A data_label_off
 declare -A equs
+declare -A regs
+regs["rax"]=0
+regs["rcx"]=1
+regs["rdx"]=2
+regs["rbx"]=3
+regs["rsp"]=4
+regs["rbp"]=5
+regs["rsi"]=6
+regs["rdi"]=7
 
 data_bytes=""
 text_ins=()
@@ -99,12 +108,12 @@ for raw in "${lines[@]}"; do
   section\ .data)
     in_section="data"
     continue
-    ;;
+    ;; 
   section\ .text)
     in_section="text"
     continue
-    ;;
-  global\ *) continue ;;
+    ;; 
+  global\ *) continue ;; 
   esac
 
   if [[ "$in_section" == "data" ]]; then
@@ -125,8 +134,8 @@ for raw in "${lines[@]}"; do
       name="${BASH_REMATCH[1]}"
       txt="${BASH_REMATCH[2]}"
       extra="${BASH_REMATCH[4]}"
-      txt="$(echo -n "$txt" | sed -e 's/\\\\/\\x5c/g' -e 's/\\n/\
-/g' -e 's/\\\"/\"/g')"
+      txt="$(echo -n "$txt" | sed -e 's/\\/\\\x5c/g' -e 's/\n/\
+/g' -e 's/\"/"/g')"
       hex=""
       i=0
       while [ $i -lt ${#txt} ]; do
@@ -152,38 +161,39 @@ for raw in "${lines[@]}"; do
       continue
     fi
     text_ins+=("$line")
-    case "$line" in
-    syscall) text_bytes_len=$((text_bytes_len + 2)) ;;
-    nop) text_bytes_len=$((text_bytes_len + 1)) ;;
-    "xor rdi, rdi") text_bytes_len=$((text_bytes_len + 3)) ;;
-    ret) text_bytes_len=$((text_bytes_len + 1)) ;;
-    "push rax") text_bytes_len=$((text_bytes_len + 1)) ;;
-    "pop rdi") text_bytes_len=$((text_bytes_len + 1)) ;;
-    "mov rsi,"*) text_bytes_len=$((text_bytes_len + 10)) ;;
-    "mov rax,"*) text_bytes_len=$((text_bytes_len + 7)) ;;
-    "mov rdi,"*)
-      if [[ "$line" == "mov rdi, rax" ]]; then
-        text_bytes_len=$((text_bytes_len + 3))
+    if [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
+      text_bytes_len=$((text_bytes_len + 3))
+    elif [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(.*)$ ]]; then
+      arg="${BASH_REMATCH[2]}"
+      if [[ "$arg" =~ ^[0-9]+$ ]] || [[ "$arg" =~ ^0x[0-9a-fA-F]+$ ]] || [[ -n "${equs[$arg]:-}" ]]; then
+        text_bytes_len=$((text_bytes_len + 7))
+      else
+        text_bytes_len=$((text_bytes_len + 10))
+      fi
+    elif [[ "$line" == "syscall" ]]; then
+      text_bytes_len=$((text_bytes_len + 2))
+    elif [[ "$line" == "nop" ]]; then
+      text_bytes_len=$((text_bytes_len + 1))
+    elif [[ "$line" == "ret" ]]; then
+      text_bytes_len=$((text_bytes_len + 1))
+    elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
+      text_bytes_len=$((text_bytes_len + 3))
+    elif [[ "$line" =~ ^push[[:space:]]+rax$ ]]; then
+      text_bytes_len=$((text_bytes_len + 1))
+    elif [[ "$line" =~ ^pop[[:space:]]+rdi$ ]]; then
+      text_bytes_len=$((text_bytes_len + 1))
+    elif [[ "$line" =~ ^(add|sub|cmp)[[:space:]]+rax,.*$ ]]; then
+      if [[ "$line" =~ ^cmp.*$ ]]; then
+        text_bytes_len=$((text_bytes_len + 6))
       else
         text_bytes_len=$((text_bytes_len + 7))
       fi
-      ;;
-    "add rax,"*) text_bytes_len=$((text_bytes_len + 7)) ;;
-    "sub rax,"*) text_bytes_len=$((text_bytes_len + 7)) ;;
-    "cmp rax,"*) text_bytes_len=$((text_bytes_len + 6)) ;;
-    "je "*) text_bytes_len=$((text_bytes_len + 2)) ;;
-    "jne "*) text_bytes_len=$((text_bytes_len + 2)) ;;
-    "jg "*) text_bytes_len=$((text_bytes_len + 2)) ;;
-    "jl "*) text_bytes_len=$((text_bytes_len + 2)) ;;
-    "jge "*) text_bytes_len=$((text_bytes_len + 2)) ;;
-    "jle "*) text_bytes_len=$((text_bytes_len + 2)) ;;
-    "jmp "*) text_bytes_len=$((text_bytes_len + 2)) ;;
-    "mov rdx,"*) text_bytes_len=$((text_bytes_len + 7)) ;;
-    *)
+    elif [[ "$line" =~ ^(j|J) ]]; then
+      text_bytes_len=$((text_bytes_len + 2))
+    else
       echo "unsupported instruction: $line" >&2
       exit 1
-      ;;
-    esac
+    fi
   else
     echo "no section for: $line" >&2
     exit 1
@@ -205,21 +215,28 @@ fi
 text_hex=""
 current_address=0
 for line in "${text_ins[@]}"; do
-  case "$line" in
-  syscall) text_hex+="0f05"; current_address=$((current_address + 2)) ;;
-  nop) text_hex+="90"; current_address=$((current_address + 1)) ;;
-  "xor rdi, rdi") text_hex+="4831ff"; current_address=$((current_address + 3)) ;;
-  ret) text_hex+="c3"; current_address=$((current_address + 1)) ;;
-  "push rax") text_hex+="50"; current_address=$((current_address + 1)) ;;
-  "pop rdi") text_hex+="5f"; current_address=$((current_address + 1)) ;;
-  "mov rsi,"*)
-    op="48be"
-    arg="${line#mov rsi, }"
-    if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
-      addr=$((16#${BASH_REMATCH[1]}))
-    elif [[ "$arg" =~ ^[0-9]+$ ]]; then
-      addr=$arg
+  if [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
+    dst="${BASH_REMATCH[1]}"
+    src="${BASH_REMATCH[2]}"
+    modrm=$((0xc0 + regs[$src] * 8 + regs[$dst]))
+    text_hex+=$(printf "4889%02x" $modrm)
+    current_address=$((current_address + 3))
+  elif [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(.*)$ ]]; then
+    reg="${BASH_REMATCH[1]}"
+    arg="${BASH_REMATCH[2]}"
+    if [[ "$arg" =~ ^[0-9]+$ ]] || [[ "$arg" =~ ^0x[0-9a-fA-F]+$ ]] || [[ -n "${equs[$arg]:-}" ]]; then
+      if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+        val=$((16#${BASH_REMATCH[1]}))
+      elif [[ "$arg" =~ ^[0-9]+$ ]]; then
+        val=$((arg))
+      elif [[ -n "${equs[$arg]:-}" ]]; then
+        val=${equs[$arg]}
+      fi
+      opcode=$((0xc0 + regs[$reg]))
+      text_hex+=$(printf "48c7%02x" $opcode)$(u32le $val)
+      current_address=$((current_address + 7))
     else
+      op=$((0xb8 + regs[$reg]))
       if [[ -n "${data_label_off[$arg]:-}" ]]; then
         addr=$((data_vaddr + data_label_off[$arg]))
       elif [[ -n "${labels[$arg]:-}" ]]; then
@@ -228,47 +245,32 @@ for line in "${text_ins[@]}"; do
         echo "unknown label $arg" >&2
         exit 1
       fi
+      text_hex+=$(printf "48%02x" $op)$(u64le $addr)
+      current_address=$((current_address + 10))
     fi
-    text_hex+="$op$(u64le $addr)"
-    current_address=$((current_address + 10))
-    ;;
-  "mov rax,"*)
-    arg="${line#mov rax, }"
-    if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
-      val=$((16#${BASH_REMATCH[1]}))
-    elif [[ "$arg" =~ ^[0-9]+$ ]]; then
-      val=$((arg))
-    elif [[ -n "${equs[$arg]:-}" ]]; then
-      val=${equs[$arg]}
-    else
-      echo "unknown immediate $arg" >&2
-      exit 1
-    fi
-    text_hex+="48c7c0$(u32le $val)"
-    current_address=$((current_address + 7))
-    ;;
-  "mov rdi,"*)
-    if [[ "$line" == "mov rdi, rax" ]]; then
-      text_hex+="4889c7"
-      current_address=$((current_address + 3))
-    else
-      arg="${line#mov rdi, }"
-      if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
-        val=$((16#${BASH_REMATCH[1]}))
-      elif [[ "$arg" =~ ^[0-9]+$ ]]; then
-        val=$((arg))
-      elif [[ -n "${equs[$arg]:-}" ]]; then
-        val=${equs[$arg]}
-      else
-        echo "unknown immediate $arg" >&2
-        exit 1
-      fi
-      text_hex+="48c7c7$(u32le $val)"
-      current_address=$((current_address + 7))
-    fi
-    ;;
-  "add rax,"*)
-    arg="${line#add rax, }"
+  elif [[ "$line" == "syscall" ]]; then
+    text_hex+="0f05"
+    current_address=$((current_address + 2))
+  elif [[ "$line" == "nop" ]]; then
+    text_hex+="90"
+    current_address=$((current_address + 1))
+  elif [[ "$line" == "ret" ]]; then
+    text_hex+="c3"
+    current_address=$((current_address + 1))
+  elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
+    reg="${BASH_REMATCH[1]}"
+    modrm=$((0xc0 + regs[$reg] * 8 + regs[$reg]))
+    text_hex+=$(printf "4831%02x" $modrm)
+    current_address=$((current_address + 3))
+  elif [[ "$line" =~ ^push[[:space:]]+rax$ ]]; then
+    text_hex+="50"
+    current_address=$((current_address + 1))
+  elif [[ "$line" =~ ^pop[[:space:]]+rdi$ ]]; then
+    text_hex+="5f"
+    current_address=$((current_address + 1))
+  elif [[ "$line" =~ ^(add|sub|cmp)[[:space:]]+rax,[[:space:]]*(.*)$ ]]; then
+    op="${BASH_REMATCH[1]}"
+    arg="${BASH_REMATCH[2]}"
     if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
       val=$((16#${BASH_REMATCH[1]}))
     elif [[ "$arg" =~ ^[0-9]+$ ]]; then
@@ -277,37 +279,14 @@ for line in "${text_ins[@]}"; do
       echo "unknown immediate $arg" >&2
       exit 1
     fi
-    text_hex+="4881c0$(u32le $val)"
-    current_address=$((current_address + 7))
-    ;;
-  "sub rax,"*)
-    arg="${line#sub rax, }"
-    if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
-      val=$((16#${BASH_REMATCH[1]}))
-    elif [[ "$arg" =~ ^[0-9]+$ ]]; then
-      val=$((arg))
-    else
-      echo "unknown immediate $arg" >&2
-      exit 1
-    fi
-    text_hex+="4881e8$(u32le $val)"
-    current_address=$((current_address + 7))
-    ;;
-  "cmp rax,"*)
-    arg="${line#cmp rax, }"
-    if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
-      val=$((16#${BASH_REMATCH[1]}))
-    elif [[ "$arg" =~ ^[0-9]+$ ]]; then
-      val=$((arg))
-    else
-      echo "unknown immediate $arg" >&2
-      exit 1
-    fi
-    text_hex+="483d$(u32le $val)"
-    current_address=$((current_address + 6))
-    ;;
-  "je "*)
-    lbl="${line#je }"
+    case "$op" in
+      add) text_hex+="4881c0$(u32le $val)"; current_address=$((current_address + 7)) ;; 
+      sub) text_hex+="4881e8$(u32le $val)"; current_address=$((current_address + 7)) ;; 
+      cmp) text_hex+="483d$(u32le $val)"; current_address=$((current_address + 6)) ;; 
+    esac
+  elif [[ "$line" =~ ^(je|jne|jg|jl|jge|jle|jmp)[[:space:]]+(.*)$ ]]; then
+    op="${BASH_REMATCH[1]}"
+    lbl="${BASH_REMATCH[2]}"
     if [[ -z "${labels[$lbl]:-}" ]]; then
       echo "unknown label $lbl" >&2
       exit 1
@@ -319,125 +298,20 @@ for line in "${text_ins[@]}"; do
       exit 1
     fi
     offset_hex=$(printf "%02x" $((offset & 0xff)))
-    text_hex+="74$offset_hex"
+    case "$op" in
+      je) text_hex+="74$offset_hex" ;; 
+      jne) text_hex+="75$offset_hex" ;; 
+      jg) text_hex+="7f$offset_hex" ;; 
+      jl) text_hex+="7c$offset_hex" ;; 
+      jge) text_hex+="7d$offset_hex" ;; 
+      jle) text_hex+="7e$offset_hex" ;; 
+      jmp) text_hex+="eb$offset_hex" ;; 
+    esac
     current_address=$((current_address + 2))
-    ;;
-  "jne "*)
-    lbl="${line#jne }"
-    if [[ -z "${labels[$lbl]:-}" ]]; then
-      echo "unknown label $lbl" >&2
-      exit 1
-    fi
-    target_address=${labels[$lbl]}
-    offset=$((target_address - (current_address + 2)))
-    if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
-      echo "short jump out of range: $offset" >&2
-      exit 1
-    fi
-    offset_hex=$(printf "%02x" $((offset & 0xff)))
-    text_hex+="75$offset_hex"
-    current_address=$((current_address + 2))
-    ;;
-  "jg "*)
-    lbl="${line#jg }"
-    if [[ -z "${labels[$lbl]:-}" ]]; then
-      echo "unknown label $lbl" >&2
-      exit 1
-    fi
-    target_address=${labels[$lbl]}
-    offset=$((target_address - (current_address + 2)))
-    if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
-      echo "short jump out of range: $offset" >&2
-      exit 1
-    fi
-    offset_hex=$(printf "%02x" $((offset & 0xff)))
-    text_hex+="7f$offset_hex"
-    current_address=$((current_address + 2))
-    ;;
-  "jl "*)
-    lbl="${line#jl }"
-    if [[ -z "${labels[$lbl]:-}" ]]; then
-      echo "unknown label $lbl" >&2
-      exit 1
-    fi
-    target_address=${labels[$lbl]}
-    offset=$((target_address - (current_address + 2)))
-    if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
-      echo "short jump out of range: $offset" >&2
-      exit 1
-    fi
-    offset_hex=$(printf "%02x" $((offset & 0xff)))
-    text_hex+="7c$offset_hex"
-    current_address=$((current_address + 2))
-    ;;
-  "jge "*)
-    lbl="${line#jge }"
-    if [[ -z "${labels[$lbl]:-}" ]]; then
-      echo "unknown label $lbl" >&2
-      exit 1
-    fi
-    target_address=${labels[$lbl]}
-    offset=$((target_address - (current_address + 2)))
-    if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
-      echo "short jump out of range: $offset" >&2
-      exit 1
-    fi
-    offset_hex=$(printf "%02x" $((offset & 0xff)))
-    text_hex+="7d$offset_hex"
-    current_address=$((current_address + 2))
-    ;;
-  "jle "*)
-    lbl="${line#jle }"
-    if [[ -z "${labels[$lbl]:-}" ]]; then
-      echo "unknown label $lbl" >&2
-      exit 1
-    fi
-    target_address=${labels[$lbl]}
-    offset=$((target_address - (current_address + 2)))
-    if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
-      echo "short jump out of range: $offset" >&2
-      exit 1
-    fi
-    offset_hex=$(printf "%02x" $((offset & 0xff)))
-    text_hex+="7e$offset_hex"
-    current_address=$((current_address + 2))
-    ;;
-  "jmp "*)
-    lbl="${line#jmp }"
-    if [[ -z "${labels[$lbl]:-}" ]]; then
-      echo "unknown label $lbl" >&2
-      exit 1
-    fi
-    target_address=${labels[$lbl]}
-    offset=$((target_address - (current_address + 2)))
-    if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
-      echo "short jump out of range: $offset" >&2
-      exit 1
-    fi
-    offset_hex=$(printf "%02x" $((offset & 0xff)))
-    text_hex+="eb$offset_hex"
-    current_address=$((current_address + 2))
-    ;;
-  "mov rdx,"*)
-    arg="${line#mov rdx, }"
-    if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
-      val=$((16#${BASH_REMATCH[1]}))
-    elif [[ "$arg" =~ ^[0-9]+$ ]]; then
-      val=$((arg))
-    elif [[ -n "${equs[$arg]:-}" ]]; then
-      val=${equs[$arg]}
-    else
-      echo "unknown immediate $arg" >&2
-      exit 1
-    fi
-    text_hex+="48c7c2$(u32le $val)"
-    current_address=$((current_address + 7))
-    ;;
-  *)
+  else
     echo "internal error assembling: $line" >&2
     exit 1
-    ;;
-  esac
+  fi
 done
 
 tmpf="$(mktemp)"
