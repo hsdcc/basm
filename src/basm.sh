@@ -146,7 +146,7 @@ for raw in "${lines[@]}"; do
     echo "unsupported data line: $line" >&2
     exit 1
   elif [[ "$in_section" == "text" ]]; then
-    if [[ "$line" =~ ^([a-zA-Z0-9_]+):$ ]]; then
+    if [[ "$line" =~ ^([.a-zA-Z0-9_]+):$ ]]; then
       lbl="${BASH_REMATCH[1]}"
       labels["$lbl"]="$text_bytes_len"
       continue
@@ -170,6 +170,14 @@ for raw in "${lines[@]}"; do
       ;;
     "add rax,"*) text_bytes_len=$((text_bytes_len + 7)) ;;
     "sub rax,"*) text_bytes_len=$((text_bytes_len + 7)) ;;
+    "cmp rax,"*) text_bytes_len=$((text_bytes_len + 6)) ;;
+    "je "*) text_bytes_len=$((text_bytes_len + 2)) ;;
+    "jne "*) text_bytes_len=$((text_bytes_len + 2)) ;;
+    "jg "*) text_bytes_len=$((text_bytes_len + 2)) ;;
+    "jl "*) text_bytes_len=$((text_bytes_len + 2)) ;;
+    "jge "*) text_bytes_len=$((text_bytes_len + 2)) ;;
+    "jle "*) text_bytes_len=$((text_bytes_len + 2)) ;;
+    "jmp "*) text_bytes_len=$((text_bytes_len + 2)) ;;
     "mov rdx,"*) text_bytes_len=$((text_bytes_len + 7)) ;;
     *)
       echo "unsupported instruction: $line" >&2
@@ -195,14 +203,15 @@ if [[ -n "${labels[_start]:-}" ]]; then
 fi
 
 text_hex=""
+current_address=0
 for line in "${text_ins[@]}"; do
   case "$line" in
-  syscall) text_hex+="0f05" ;;
-  nop) text_hex+="90" ;;
-  "xor rdi, rdi") text_hex+="4831ff" ;;
-  ret) text_hex+="c3" ;;
-  "push rax") text_hex+="50" ;;
-  "pop rdi") text_hex+="5f" ;;
+  syscall) text_hex+="0f05"; current_address=$((current_address + 2)) ;;
+  nop) text_hex+="90"; current_address=$((current_address + 1)) ;;
+  "xor rdi, rdi") text_hex+="4831ff"; current_address=$((current_address + 3)) ;;
+  ret) text_hex+="c3"; current_address=$((current_address + 1)) ;;
+  "push rax") text_hex+="50"; current_address=$((current_address + 1)) ;;
+  "pop rdi") text_hex+="5f"; current_address=$((current_address + 1)) ;;
   "mov rsi,"*)
     op="48be"
     arg="${line#mov rsi, }"
@@ -221,6 +230,7 @@ for line in "${text_ins[@]}"; do
       fi
     fi
     text_hex+="$op$(u64le $addr)"
+    current_address=$((current_address + 10))
     ;;
   "mov rax,"*)
     arg="${line#mov rax, }"
@@ -235,10 +245,12 @@ for line in "${text_ins[@]}"; do
       exit 1
     fi
     text_hex+="48c7c0$(u32le $val)"
+    current_address=$((current_address + 7))
     ;;
   "mov rdi,"*)
     if [[ "$line" == "mov rdi, rax" ]]; then
       text_hex+="4889c7"
+      current_address=$((current_address + 3))
     else
       arg="${line#mov rdi, }"
       if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
@@ -252,6 +264,7 @@ for line in "${text_ins[@]}"; do
         exit 1
       fi
       text_hex+="48c7c7$(u32le $val)"
+      current_address=$((current_address + 7))
     fi
     ;;
   "add rax,"*)
@@ -265,6 +278,7 @@ for line in "${text_ins[@]}"; do
       exit 1
     fi
     text_hex+="4881c0$(u32le $val)"
+    current_address=$((current_address + 7))
     ;;
   "sub rax,"*)
     arg="${line#sub rax, }"
@@ -277,6 +291,132 @@ for line in "${text_ins[@]}"; do
       exit 1
     fi
     text_hex+="4881e8$(u32le $val)"
+    current_address=$((current_address + 7))
+    ;;
+  "cmp rax,"*)
+    arg="${line#cmp rax, }"
+    if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+      val=$((16#${BASH_REMATCH[1]}))
+    elif [[ "$arg" =~ ^[0-9]+$ ]]; then
+      val=$((arg))
+    else
+      echo "unknown immediate $arg" >&2
+      exit 1
+    fi
+    text_hex+="483d$(u32le $val)"
+    current_address=$((current_address + 6))
+    ;;
+  "je "*)
+    lbl="${line#je }"
+    if [[ -z "${labels[$lbl]:-}" ]]; then
+      echo "unknown label $lbl" >&2
+      exit 1
+    fi
+    target_address=${labels[$lbl]}
+    offset=$((target_address - (current_address + 2)))
+    if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
+      echo "short jump out of range: $offset" >&2
+      exit 1
+    fi
+    offset_hex=$(printf "%02x" $((offset & 0xff)))
+    text_hex+="74$offset_hex"
+    current_address=$((current_address + 2))
+    ;;
+  "jne "*)
+    lbl="${line#jne }"
+    if [[ -z "${labels[$lbl]:-}" ]]; then
+      echo "unknown label $lbl" >&2
+      exit 1
+    fi
+    target_address=${labels[$lbl]}
+    offset=$((target_address - (current_address + 2)))
+    if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
+      echo "short jump out of range: $offset" >&2
+      exit 1
+    fi
+    offset_hex=$(printf "%02x" $((offset & 0xff)))
+    text_hex+="75$offset_hex"
+    current_address=$((current_address + 2))
+    ;;
+  "jg "*)
+    lbl="${line#jg }"
+    if [[ -z "${labels[$lbl]:-}" ]]; then
+      echo "unknown label $lbl" >&2
+      exit 1
+    fi
+    target_address=${labels[$lbl]}
+    offset=$((target_address - (current_address + 2)))
+    if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
+      echo "short jump out of range: $offset" >&2
+      exit 1
+    fi
+    offset_hex=$(printf "%02x" $((offset & 0xff)))
+    text_hex+="7f$offset_hex"
+    current_address=$((current_address + 2))
+    ;;
+  "jl "*)
+    lbl="${line#jl }"
+    if [[ -z "${labels[$lbl]:-}" ]]; then
+      echo "unknown label $lbl" >&2
+      exit 1
+    fi
+    target_address=${labels[$lbl]}
+    offset=$((target_address - (current_address + 2)))
+    if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
+      echo "short jump out of range: $offset" >&2
+      exit 1
+    fi
+    offset_hex=$(printf "%02x" $((offset & 0xff)))
+    text_hex+="7c$offset_hex"
+    current_address=$((current_address + 2))
+    ;;
+  "jge "*)
+    lbl="${line#jge }"
+    if [[ -z "${labels[$lbl]:-}" ]]; then
+      echo "unknown label $lbl" >&2
+      exit 1
+    fi
+    target_address=${labels[$lbl]}
+    offset=$((target_address - (current_address + 2)))
+    if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
+      echo "short jump out of range: $offset" >&2
+      exit 1
+    fi
+    offset_hex=$(printf "%02x" $((offset & 0xff)))
+    text_hex+="7d$offset_hex"
+    current_address=$((current_address + 2))
+    ;;
+  "jle "*)
+    lbl="${line#jle }"
+    if [[ -z "${labels[$lbl]:-}" ]]; then
+      echo "unknown label $lbl" >&2
+      exit 1
+    fi
+    target_address=${labels[$lbl]}
+    offset=$((target_address - (current_address + 2)))
+    if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
+      echo "short jump out of range: $offset" >&2
+      exit 1
+    fi
+    offset_hex=$(printf "%02x" $((offset & 0xff)))
+    text_hex+="7e$offset_hex"
+    current_address=$((current_address + 2))
+    ;;
+  "jmp "*)
+    lbl="${line#jmp }"
+    if [[ -z "${labels[$lbl]:-}" ]]; then
+      echo "unknown label $lbl" >&2
+      exit 1
+    fi
+    target_address=${labels[$lbl]}
+    offset=$((target_address - (current_address + 2)))
+    if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
+      echo "short jump out of range: $offset" >&2
+      exit 1
+    fi
+    offset_hex=$(printf "%02x" $((offset & 0xff)))
+    text_hex+="eb$offset_hex"
+    current_address=$((current_address + 2))
     ;;
   "mov rdx,"*)
     arg="${line#mov rdx, }"
@@ -291,6 +431,7 @@ for line in "${text_ins[@]}"; do
       exit 1
     fi
     text_hex+="48c7c2$(u32le $val)"
+    current_address=$((current_address + 7))
     ;;
   *)
     echo "internal error assembling: $line" >&2
