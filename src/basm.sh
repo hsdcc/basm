@@ -25,7 +25,7 @@ fi
 
 source "$(dirname "$0")/../lib/basm.lib.sh"
 
-code=$(cat "$infile")
+code=$(< "$infile")
 basm_assemble "$code" "$outfile"
 
 echo "wrote $outfile"

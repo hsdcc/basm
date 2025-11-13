@@ -14,7 +14,7 @@ assert_exit_code() {
   executable="$(mktemp)"
 
   local asm_code
-  asm_code=$(cat "$asm_file")
+  asm_code=$(< "$asm_file")
 
   if ! basm_assemble "$asm_code" "$executable"; then
     echo "  [FAIL] $test_name: asm failed."
@@ -49,7 +49,7 @@ assert_output() {
   executable="$(mktemp)"
 
   local asm_code
-  asm_code=$(cat "$asm_file")
+  asm_code=$(< "$asm_file")
 
   if ! basm_assemble "$asm_code" "$executable"; then
     echo "  [FAIL] $test_name: asm failed."
