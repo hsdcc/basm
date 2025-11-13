@@ -81,6 +81,8 @@ assert_exit_code "lib_sub" "$test_asm_dir/lib_sub.asm" 5 || failed_tests=$((fail
 assert_exit_code "lib_xor" "$test_asm_dir/lib_xor.asm" 0 || failed_tests=$((failed_tests + 1))
 assert_exit_code "lib_je_taken" "$test_asm_dir/lib_je_taken.asm" 2 || failed_tests=$((failed_tests + 1))
 assert_exit_code "lib_je_not_taken" "$test_asm_dir/lib_je_not_taken.asm" 1 || failed_tests=$((failed_tests + 1))
+assert_exit_code "lib_jmp" "$test_asm_dir/lib_jmp.asm" 42 || failed_tests=$((failed_tests + 1))
+
 
 
 if [ "$failed_tests" -gt 0 ]; then
