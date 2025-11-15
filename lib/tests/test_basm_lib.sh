@@ -82,6 +82,18 @@ assert_exit_code "lib_xor" "$test_asm_dir/lib_xor.asm" 0 || failed_tests=$((fail
 assert_exit_code "lib_je_taken" "$test_asm_dir/lib_je_taken.asm" 2 || failed_tests=$((failed_tests + 1))
 assert_exit_code "lib_je_not_taken" "$test_asm_dir/lib_je_not_taken.asm" 1 || failed_tests=$((failed_tests + 1))
 assert_exit_code "lib_jmp" "$test_asm_dir/lib_jmp.asm" 42 || failed_tests=$((failed_tests + 1))
+assert_exit_code "lib_inc_dec" "$test_asm_dir/lib_inc_dec.asm" 11 || failed_tests=$((failed_tests + 1))
+assert_exit_code "lib_and_or" "$test_asm_dir/lib_and_or.asm" 3 || failed_tests=$((failed_tests + 1))
+assert_exit_code "lib_call" "$test_asm_dir/lib_call.asm" 42 || failed_tests=$((failed_tests + 1))
+assert_exit_code "lib_mul" "$test_asm_dir/lib_mul.asm" 42 || failed_tests=$((failed_tests + 1))
+assert_exit_code "lib_div" "$test_asm_dir/lib_div.asm" 6 || failed_tests=$((failed_tests + 1))
+assert_output "lib_lea" "$test_asm_dir/lib_lea.asm" "a" || failed_tests=$((failed_tests + 1))
+assert_exit_code "lib_test" "$test_asm_dir/lib_test.asm" 1 || failed_tests=$((failed_tests + 1))
+assert_exit_code "lib_push_pop_all" "$test_asm_dir/lib_push_pop_all.asm" 1 || failed_tests=$((failed_tests + 1))
+assert_exit_code "lib_imul" "$test_asm_dir/lib_imul.asm" 214 || failed_tests=$((failed_tests + 1))
+assert_exit_code "lib_idiv" "$test_asm_dir/lib_idiv.asm" 250 || failed_tests=$((failed_tests + 1))
+assert_exit_code "lib_shift" "$test_asm_dir/lib_shift.asm" 4 || failed_tests=$((failed_tests + 1))
+assert_exit_code "lib_neg" "$test_asm_dir/lib_neg.asm" 214 || failed_tests=$((failed_tests + 1))
 
 
 
