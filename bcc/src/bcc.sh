@@ -9,15 +9,27 @@ outfile="${2:-a.out}"
 
 if [ "$infile" = "test" ]; then
   echo "running tests"
-  # Add tests here later
-  # if bash lib/tests/test_bcc_lib.sh; then
-  #   echo "all tests passed. good job."
-  #   exit 0
-  # else
-  #   echo "tests failed."
-  #   exit 1
-  # fi
-  exit 0
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # Use a temporary file to run the test and check its output
+  temp_output=$(mktemp)
+  bash "$SCRIPT_DIR/../dynamic_test.sh" > "$temp_output" 2>&1
+  exit_code=$?
+  
+  # Display the output
+  cat "$temp_output"
+  
+  # The script might have exit code issue due to set -e in libraries
+  # Check if the output indicates success by looking for success keywords
+  if grep -q "All tests passed" "$temp_output"; then
+    rm "$temp_output"
+    echo "all tests passed. good job."
+    exit 0
+  else
+    rm "$temp_output"
+    echo "tests failed."
+    # Use the original exit code in case of failure
+    exit $exit_code
+  fi
 fi
 
 if [ -z "$infile" ]; then

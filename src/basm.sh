@@ -9,7 +9,7 @@ outfile="${2:-a.out}"
 
 if [ "$infile" = "test" ]; then
   echo "running tests"
-  if bash lib/tests/test_basm_lib.sh; then
+  if bash lib/tests/dynamic_test_basm_lib.sh; then
     echo "all tests passed. good job."
     exit 0
   else
