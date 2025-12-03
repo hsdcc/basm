@@ -1,0 +1,94 @@
+# x86_64 instruction defs file
+# Format: instruction,operands,opcode,size,encoding_type
+# 
+# instruction: name of the instruction (mov, add, etc.)
+# operands: comma-separated operand types (r64 for 64-bit register, imm32 for 32-bit immediate, etc.)
+# opcode: hex opcode bytes (without spaces)
+# size: byte size of the instruction
+# encoding_type: type of encoding to use
+# 
+# Register mappings: rax=0, rcx=1, rdx=2, rbx=3, rsp=4, rbp=5, rsi=6, rdi=7
+
+# MOV instruction definitions
+mov,r64,r64,4889,3,reg_to_reg
+mov,r64,imm32,48C7,7,reg_to_imm32
+mov,r64,imm64,48,10,reg_to_imm64
+
+# ADD instruction definitions
+add,r64,r64,4801,4,reg_to_reg
+add,rax,imm32,4881C0,7,rax_add_imm32
+add,r64,imm8,4883,4,reg_add_imm8
+
+# SUB instruction definitions
+sub,r64,r64,4829,4,reg_to_reg
+sub,rax,imm32,4881E8,7,rax_sub_imm32
+sub,r64,imm8,4883,4,reg_sub_imm8
+
+# CMP instruction definitions
+cmp,r64,r64,4839,4,reg_to_reg
+cmp,rax,imm32,483D,6,rax_cmp_imm32
+cmp,r64,imm8,4883,4,reg_cmp_imm8
+
+# OR instruction definitions
+or,r64,r64,4809,4,reg_to_reg
+or,rax,imm32,4881C8,7,rax_or_imm32
+or,r64,imm8,4883,4,reg_or_imm8
+
+# AND instruction definitions
+and,r64,r64,4821,4,reg_to_reg
+and,rax,imm32,4881E0,7,rax_and_imm32
+and,r64,imm8,4883,4,reg_and_imm8
+
+# XOR instruction definitions
+xor,r64,r64,4831,3,reg_to_reg
+
+# INC/DEC instruction definitions
+inc,r64,48FF,3,inc_dec_reg
+dec,r64,48FF,3,inc_dec_reg
+
+# NEG instruction definitions
+neg,r64,48F7,3,neg_reg
+
+# MUL/DIV/IDIV instruction definitions
+mul,r64,48F7,3,mul_div_reg
+div,r64,48F7,3,mul_div_reg
+idiv,r64,48F7,3,mul_div_reg
+
+# IMUL instruction definitions
+imul,r64,r64,480FAF,4,imul_reg_reg
+
+# SHL/SHR instruction definitions
+shl,r64,imm8,48C1,4,shift_reg_imm8
+shr,r64,imm8,48C1,4,shift_reg_imm8
+
+# TEST instruction definitions
+test,r64,r64,4885,3,test_reg_reg
+test,r64,imm32,48F7,7,test_reg_imm32
+
+# LEA instruction definitions
+lea,r64,mem,488D,7,lea_reg_mem
+
+# PUSH/POP instruction definitions
+push,r64,50,1,push_pop_reg
+pop,r64,58,1,push_pop_reg
+
+# CALL instruction definitions
+call,imm32,E8,5,call_rel32
+
+# JUMP instruction definitions
+jmp,imm8,EB,2,jmp_rel8
+je,imm8,74,2,jmp_rel8
+jne,imm8,75,2,jmp_rel8
+jg,imm8,7F,2,jmp_rel8
+jl,imm8,7C,2,jmp_rel8
+jge,imm8,7D,2,jmp_rel8
+jle,imm8,7E,2,jmp_rel8
+
+# System instructions
+syscall,,0F05,2,syscall
+
+# NOP instruction
+nop,,90,1,nop
+
+# RET instruction
+ret,,C3,1,ret
