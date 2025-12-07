@@ -83,6 +83,7 @@ jg,imm8,7F,2,jmp_rel8
 jl,imm8,7C,2,jmp_rel8
 jge,imm8,7D,2,jmp_rel8
 jle,imm8,7E,2,jmp_rel8
+loop,imm8,E2,2,jmp_rel8
 
 # System instructions
 syscall,,0F05,2,syscall
