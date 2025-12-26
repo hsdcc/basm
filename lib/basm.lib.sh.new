@@ -1,0 +1,1262 @@
+#!/usr/bin/env bash
+
+# Helper function to trim leading and trailing whitespace from a string
+trim_string() {
+  local str="$1"
+  # Remove leading whitespace
+  str="${str#"${str%%[![:space:]]*}"}"
+  # Remove trailing whitespace
+  str="${str%"${str##*[![:space:]]}"}"
+  echo "$str"
+}
+
+# Helper function to convert hex string to binary data
+hex_to_bin() {
+  local hex="$1"
+  local -a bytes
+  local i
+  
+  # Ensure even length hex string
+  if (( ${#hex} % 2 != 0 )); then
+    hex="0$hex"
+  fi
+  
+  # Split hex string into byte pairs and convert to binary
+  for ((i = 0; i < ${#hex}; i += 2)); do
+    local byte="${hex:$i:2}"
+    printf "\\x$byte"
+  done
+}
+
+# Helper function to generate padding zeros
+generate_zeros() {
+  local count="$1"
+  local i
+  for ((i = 0; i < count; i++)); do
+    printf "\\x00"
+  done
+}
+
+# Helper function to write data at specific offset in a file
+write_at_offset() {
+  local src_file="$1"    # Source file containing data to write
+  local dest_file="$2"   # Destination file to write to
+  local offset="$3"      # Byte offset to write at
+  
+  # Read the source file content
+  local src_content
+  src_content=$(< "$src_file")
+  
+  # Read the destination file content
+  local dest_content
+  if [[ -f "$dest_file" ]]; then
+    dest_content=$(< "$dest_file")
+  else
+    dest_content=""
+  fi
+  
+  # Ensure destination is at least 'offset' bytes long by padding with nulls if necessary
+  local current_len=${#dest_content}
+  local padded_content="$dest_content"
+  if (( current_len < offset )); then
+    local padding_len=$((offset - current_len))
+    local i
+    for ((i = 0; i < padding_len; i++)); do
+      padded_content+=$'\0'
+    done
+  fi
+  
+  # Calculate where to place the source content
+  local prefix="${padded_content:0:offset}"
+  local suffix="${padded_content:offset}"
+  
+  # Combine: prefix + src_content + suffix
+  local result="$prefix$src_content$suffix"
+  
+  # Write the combined content back to the destination file
+  printf '%s' "$result" > "$dest_file"
+}
+
+# Load instruction definitions from file
+load_instruction_defs() {
+  local defs_file="$1"
+  declare -gA instruction_defs  # Global associative array for instruction definitions
+  declare -gA instruction_sizes # Global associative array for instruction sizes
+  declare -gA instruction_opcodes # Global associative array for opcodes
+
+  if [[ ! -f "$defs_file" ]]; then
+    echo "instruction definitions file not found: $defs_file" >&2
+    return 1
+  fi
+
+  while IFS= read -r line; do
+    # Skip empty lines and comments
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+
+    # Parse line: instruction,operands,opcode,size,encoding_rule
+    # We need to handle cases where there might be empty operands field
+    local parts=()
+    local part
+    local IFS_backup="$IFS"
+    IFS=','
+    for part in $line; do
+        parts+=("$part")
+    done
+    IFS="$IFS_backup"
+    
+    if [[ ${#parts[@]} -lt 5 ]]; then
+      continue
+    fi
+    
+    local instruction="${parts[0]}"
+    local operands="${parts[1]},${parts[2]}"  # operands might take 2 slots if there are 2 operands
+    local opcode="${parts[3]}"
+    local size="${parts[4]}"
+    local encoding_rule="${parts[5]:-}"
+    
+    # If parts[2] is empty, it means the instruction has only one operand
+    if [[ -z "${parts[2]}" ]]; then
+      operands="${parts[1]}"
+    elif [[ -n "${parts[3]}" && -z "${parts[4]}" ]]; then
+      # Handle cases where there's no size (like for nop, ret, syscall)
+      operands="${parts[1]},${parts[2]}"
+      opcode="${parts[3]}"
+      encoding_rule="${parts[4]:-}"
+    elif [[ -n "${parts[2]}" && -z "${parts[3]}" ]]; then
+      # Handle single operand cases like syscall, nop, ret
+      operands="${parts[1]}"
+      opcode="${parts[2]}"
+      size="${parts[3]:-}"
+      encoding_rule="${parts[4]:-}"
+    fi
+    
+    # Remove leading/trailing whitespace using pure bash
+    instruction=$(trim_string "$instruction")
+    operands=$(trim_string "$operands")
+    opcode=$(trim_string "$opcode")
+    size=$(trim_string "$size")
+    encoding_rule=$(trim_string "$encoding_rule")
+    
+    # Ensure operands doesn't start with a comma (in case of empty first part)
+    if [[ "${operands:0:1}" == "," ]]; then
+      operands="${operands:1}"
+    fi
+    
+    # Clean up operands to avoid trailing commas
+    if [[ "${operands: -1}" == "," ]]; then
+      operands="${operands%?}"
+    fi
+
+    # Store in associative arrays
+    instruction_defs["$instruction,$operands"]="$opcode $encoding_rule"
+    instruction_sizes["$instruction,$operands"]="$size"
+    instruction_opcodes["$instruction,$operands"]="$opcode"
+  done <"$defs_file"
+}
+
+basm_assemble() {
+  local code_str="${1:-""]}"
+  local outfile="${2:-a.out}"
+
+  # Load instruction definitions
+  local defs_file="${BASH_SOURCE%/*}/../chipsets/x86_64_comprehensive.def"
+  if ! load_instruction_defs "$defs_file"; then
+    echo "failed to load instruction definitions" >&2
+    return 1
+  fi
+
+  u32le() {
+    local n=$1
+    printf "%02x%02x%02x%02x" $((n & 0xff)) $(((n >> 8) & 0xff)) $(((n >> 16) & 0xff)) $(((n >> 24) & 0xff))
+  }
+  u64le() {
+    local n=$1
+    local b0=$((n & 0xff))
+    local b1=$(((n >> 8) & 0xff))
+    local b2=$(((n >> 16) & 0xff))
+    local b3=$(((n >> 24) & 0xff))
+    local b4=$(((n >> 32) & 0xff))
+    local b5=$(((n >> 40) & 0xff))
+    local b6=$(((n >> 48) & 0xff))
+    local b7=$(((n >> 56) & 0xff))
+    printf "%02x%02x%02x%02x%02x%02x%02x%02x" $b0 $b1 $b2 $b3 $b4 $b5 $b6 $b7
+  }
+
+  # Function to convert assembly operands to definition operand types
+  parse_operands() {
+    local line="$1"
+    local instruction="$2"
+    local operands=""
+    
+    # Extract operands from the line based on the instruction
+    case "$instruction" in
+      nop|syscall|ret)
+        # No operands
+        operands=""
+        ;;
+      *)
+        # Extract operands part (after the instruction name)
+        local operands_part="${line#*$instruction[[:space:]]}"
+        operands_part=$(trim_string "$operands_part")
+        
+        if [[ -z "$operands_part" ]]; then
+          # No operands
+          operands=""
+        else
+          # Parse each operand and convert to definition type
+          local parsed_operands=()
+          local part
+          local IFS_backup="$IFS"
+          IFS=','
+          for part in $operands_part; do
+            part=$(trim_string "$part")
+            # Determine operand type based on format
+            if [[ "$part" =~ ^r[a-z]{2}$ ]]; then
+              # Register
+              parsed_operands+=("r64")
+            elif [[ "$part" =~ ^\[.*\]$ ]]; then
+              # Memory address
+              parsed_operands+=("mem")
+            elif [[ "$part" =~ ^([0-9]+|0x[0-9a-fA-F]+|-?[0-9]+)$ ]]; then
+              # Immediate value - determine size
+              local val
+              if [[ "$part" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+                val=$((16#${BASH_REMATCH[1]}))
+              elif [[ "$part" =~ ^-?[0-9]+$ ]]; then
+                val=$((part))
+              else
+                continue
+              fi
+              if (( val >= -128 && val <= 127 )); then
+                parsed_operands+=("imm8")
+              elif (( val >= -2147483648 && val <= 2147483647 )); then
+                parsed_operands+=("imm32")
+              else
+                parsed_operands+=("imm64")
+              fi
+            else
+              # Label or variable - treat as immediate (for addresses)
+              parsed_operands+=("imm64")
+            fi
+          done
+          IFS="$IFS_backup"
+          
+          # Join with commas
+          local i
+          for i in "${!parsed_operands[@]}"; do
+            if [[ $i -eq 0 ]]; then
+              operands="${parsed_operands[$i]}"
+            else
+              operands="$operands,${parsed_operands[$i]}"
+            fi
+          done
+        fi
+    esac
+    
+    echo "$operands"
+  }
+
+  # Function to match instruction to definition
+  match_instruction_to_definition() {
+    local line="$1"
+    local instruction
+    local operands
+    
+    # Extract the instruction name
+    if [[ "$line" =~ ^([a-zA-Z]+)[[:space:]] ]]; then
+      instruction="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ ^([a-zA-Z]+)$ ]]; then
+      instruction="${BASH_REMATCH[1]}"
+    else
+      return 1
+    fi
+
+    # Parse operands to definition format
+    operands=$(parse_operands "$line" "$instruction")
+    
+    # Try to find exact match
+    if [[ -n "${instruction_defs[$instruction,$operands]:-}" ]]; then
+      echo "$instruction,$operands"
+      return 0
+    fi
+    
+    # Try to find match with more generic patterns
+    # For example: if "mov r64, 42" isn't found, try "mov r64, imm32"
+    if [[ "$line" =~ ^mov[[:space:]]+r([a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+|-?[0-9]+)$ ]]; then
+      # Check if it's an immediate value that fits in imm32
+      local arg="${BASH_REMATCH[2]}"
+      local val
+      if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+        val=$((16#${BASH_REMATCH[1]}))
+      elif [[ "$arg" =~ ^-?[0-9]+$ ]]; then
+        val=$((arg))
+      fi
+      
+      if (( val >= -2147483648 && val <= 2147483647 )); then
+        if [[ -n "${instruction_defs[mov,r64,imm32]:-}" ]]; then
+          echo "mov,r64,imm32"
+          return 0
+        fi
+      else
+        if [[ -n "${instruction_defs[mov,r64,imm64]:-}" ]]; then
+          echo "mov,r64,imm64"
+          return 0
+        fi
+      fi
+    elif [[ "$line" =~ ^mov[[:space:]]+r([a-z]{2}),[[:space:]]+([a-zA-Z0-9_]+)$ ]]; then
+      # It's a label/variable - treat as imm64
+      if [[ -n "${instruction_defs[mov,r64,imm64]:-}" ]]; then
+        echo "mov,r64,imm64"
+        return 0
+      fi
+    elif [[ "$line" =~ ^mov[[:space:]]+r([a-z]{2}),[[:space:]]+r([a-z]{2})$ ]]; then
+      if [[ -n "${instruction_defs[mov,r64,r64]:-}" ]]; then
+        echo "mov,r64,r64"
+        return 0
+      fi
+    elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+r([a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
+      local op="${BASH_REMATCH[1]}"
+      local reg="${BASH_REMATCH[2]}"
+      local arg="${BASH_REMATCH[3]}"
+      local val
+      if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+        val=$((16#${BASH_REMATCH[1]}))
+      else
+        val=$((arg))
+      fi
+      
+      if [[ "$reg" == "rax" ]]; then
+        if [[ -n "${instruction_defs[$op,rax,imm32]:-}" ]]; then
+          echo "$op,rax,imm32"
+          return 0
+        fi
+      else
+        if [[ -n "${instruction_defs[$op,r64,imm8]:-}" ]]; then
+          echo "$op,r64,imm8"
+          return 0
+        fi
+      fi
+    elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+r([a-z]{2}),[[:space:]]+r([a-z]{2})$ ]]; then
+      local op="${BASH_REMATCH[1]}"
+      if [[ -n "${instruction_defs[$op,r64,r64]:-}" ]]; then
+        echo "$op,r64,r64"
+        return 0
+      fi
+    elif [[ "$line" =~ ^(push|pop)[[:space:]]+r([a-z]{2})$ ]]; then
+      local op="${BASH_REMATCH[1]}"
+      if [[ -n "${instruction_defs[$op,r64]:-}" ]]; then
+        echo "$op,r64"
+        return 0
+      fi
+    elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
+      if [[ -n "${instruction_defs[call,imm32]:-}" ]]; then
+        echo "call,imm32"
+        return 0
+      fi
+    elif [[ "$line" =~ ^(j[a-z]*|loop)[[:space:]]+(.*)$ ]]; then
+      local op="${BASH_REMATCH[1]}"
+      if [[ -n "${instruction_defs[$op,imm8]:-}" ]]; then
+        echo "$op,imm8"
+        return 0
+      fi
+    elif [[ "$line" =~ ^(inc|dec|neg)[[:space:]]+r([a-z]{2})$ ]]; then
+      local op="${BASH_REMATCH[1]}"
+      if [[ -n "${instruction_defs[$op,r64]:-}" ]]; then
+        echo "$op,r64"
+        return 0
+      fi
+    elif [[ "$line" =~ ^(mul|div|idiv)[[:space:]]+r([a-z]{2})$ ]]; then
+      local op="${BASH_REMATCH[1]}"
+      if [[ -n "${instruction_defs[$op,r64]:-}" ]]; then
+        echo "$op,r64"
+        return 0
+      fi
+    elif [[ "$line" =~ ^imul[[:space:]]+r([a-z]{2}),[[:space:]]+r([a-z]{2})$ ]]; then
+      if [[ -n "${instruction_defs[imul,r64,r64]:-}" ]]; then
+        echo "imul,r64,r64"
+        return 0
+      fi
+    elif [[ "$line" =~ ^lea[[:space:]]+r([a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
+      if [[ -n "${instruction_defs[lea,r64,mem]:-}" ]]; then
+        echo "lea,r64,mem"
+        return 0
+      fi
+    elif [[ "$line" =~ ^(shl|shr)[[:space:]]+r([a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
+      local op="${BASH_REMATCH[1]}"
+      if [[ -n "${instruction_defs[$op,r64,imm8]:-}" ]]; then
+        echo "$op,r64,imm8"
+        return 0
+      fi
+    elif [[ "$line" =~ ^test[[:space:]]+r([a-z]{2}),[[:space:]]+r([a-z]{2})$ ]]; then
+      if [[ -n "${instruction_defs[test,r64,r64]:-}" ]]; then
+        echo "test,r64,r64"
+        return 0
+      fi
+    elif [[ "$line" =~ ^test[[:space:]]+r([a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
+      if [[ -n "${instruction_defs[test,r64,imm32]:-}" ]]; then
+        echo "test,r64,imm32"
+        return 0
+      fi
+    elif [[ "$line" == "syscall" ]]; then
+      if [[ -n "${instruction_defs[syscall,]:-}" ]]; then
+        echo "syscall,"
+        return 0
+      fi
+    elif [[ "$line" == "nop" ]]; then
+      if [[ -n "${instruction_defs[nop,]:-}" ]]; then
+        echo "nop,"
+        return 0
+      fi
+    elif [[ "$line" == "ret" ]]; then
+      if [[ -n "${instruction_defs[ret,]:-}" ]]; then
+        echo "ret,"
+        return 0
+      fi
+    fi
+    
+    return 1
+  }
+
+  # Function to get instruction size from definitions
+  get_instruction_size() {
+    local line="$1"
+    local def_key
+    
+    # Try to match the instruction to a definition
+    if def_key=$(match_instruction_to_definition "$line"); then
+      echo "${instruction_sizes[$def_key]:-0}"
+      return 0
+    fi
+    
+    echo "0" # Unknown instruction
+    return 1
+  }
+
+  # Encoding handler functions
+  encode_reg_to_reg() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local regs_ref="$4"
+    
+    # Extract registers from the line
+    if [[ "$line" =~ ^$instruction[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
+      local dst="${BASH_REMATCH[1]}"
+      local src="${BASH_REMATCH[2]}"
+      
+      # Get register values
+      local reg_dst_val="${!regs_ref}[$dst]"
+      local reg_src_val="${!regs_ref}[$src]"
+      
+      # Calculate MODR/M byte
+      local modrm=$((0xc0 + reg_src_val * 8 + reg_dst_val))
+      
+      # Output prefix + opcode + modrm
+      printf "48%s%02x" "$opcode" "$modrm"
+      return 0
+    fi
+    
+    return 1
+  }
+  
+  encode_reg_to_imm32() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local regs_ref="$4"
+    
+    # Extract register and immediate from the line
+    if [[ "$line" =~ ^$instruction[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+|-?[0-9]+)$ ]]; then
+      local reg="${BASH_REMATCH[1]}"
+      local imm="${BASH_REMATCH[2]}"
+      
+      # Get register value
+      local reg_val="${!regs_ref}[$reg]"
+      
+      # Parse immediate value
+      local val
+      if [[ "$imm" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+        val=$((16#${BASH_REMATCH[1]}))
+      elif [[ "$imm" =~ ^-?[0-9]+$ ]]; then
+        val=$((imm))
+      else
+        return 1
+      fi
+      
+      # Calculate MODR/M byte
+      local modrm
+      if [[ "$instruction" == "mov" ]]; then
+        # For mov r64, imm32 the opcode is different
+        modrm=$((0xc0 + reg_val))
+        printf "48%s%02x" "$opcode" "$modrm"
+        u32le "$val"
+      else
+        # For other operations with immediate
+        modrm=$((0xc0 | (reg_val)))
+        printf "48%s%02x" "$opcode" "$modrm"
+        u32le "$val"
+      fi
+      
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_reg_to_imm64() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local regs_ref="$4"
+    local data_vaddr_ref="$5"
+    local text_vaddr_ref="$6"
+    local labels_ref="$7"
+    local data_label_off_ref="$8"
+    local equs_ref="$9"
+    
+    # Extract register and immediate/address from the line
+    if [[ "$line" =~ ^$instruction[[:space:]]+(r[a-z]{2}),[[:space:]]+([a-zA-Z0-9_]+)$ ]]; then
+      local reg="${BASH_REMATCH[1]}"
+      local addr_label="${BASH_REMATCH[2]}"
+      
+      # Get register value
+      local reg_val="${!regs_ref}[$reg]"
+      
+      # Get address value based on the label
+      local addr
+      if [[ -n "${!equs_ref}[$addr_label]:-}" ]]; then
+        addr="${!equs_ref}[$addr_label]"
+      elif [[ -n "${!data_label_off_ref}[$addr_label]:-}" ]]; then
+        addr=$(( ${!data_vaddr_ref} + ${!data_label_off_ref}[$addr_label] ))
+      elif [[ -n "${!labels_ref}[$addr_label]:-}" ]]; then
+        addr=$(( ${!text_vaddr_ref} + ${!labels_ref}[$addr_label] ))
+      else
+        return 1  # Unknown label
+      fi
+      
+      # For mov r64, imm64, the opcode is different (0xb8 + reg number)
+      if [[ "$instruction" == "mov" ]]; then
+        local op=$((0xb8 + reg_val))
+        printf "48%02x" "$op"
+        u64le "$addr"
+      else
+        # This should not happen for current definitions
+        return 1
+      fi
+      
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_rax_add_imm32() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local regs_ref="$4"
+    
+    if [[ "$line" =~ ^$instruction[[:space:]]+rax,[[:space:]]+([0-9]+|0x[0-9a-fA-F]+|-?[0-9]+)$ ]]; then
+      local imm="${BASH_REMATCH[1]}"
+      
+      # Parse immediate value
+      local val
+      if [[ "$imm" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+        val=$((16#${BASH_REMATCH[1]}))
+      elif [[ "$imm" =~ ^-?[0-9]+$ ]]; then
+        val=$((imm))
+      else
+        return 1
+      fi
+      
+      printf "48%s" "$opcode"
+      u32le "$val"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_reg_add_imm8() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local regs_ref="$4"
+    
+    if [[ "$line" =~ ^$instruction[[:space:]]+r([a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
+      local reg="${BASH_REMATCH[1]}"
+      local imm="${BASH_REMATCH[2]}"
+      
+      # Get register value
+      local reg_val="${!regs_ref}[$reg]"
+      
+      # Calculate MODR/M byte (for rax - 0, for others use the extension)
+      local op_ext=0
+      case "$instruction" in
+        add) op_ext=0 ;;
+        sub) op_ext=5 ;;
+        cmp) op_ext=7 ;;
+        or) op_ext=1 ;;
+        and) op_ext=4 ;;
+      esac
+      
+      local modrm=$((0xc0 | (op_ext << 3) | reg_val))
+      
+      printf "48%s%02x%02x" "$opcode" "$modrm" "$imm"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_inc_dec_reg() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local regs_ref="$4"
+    
+    if [[ "$line" =~ ^($instruction)[[:space:]]+r([a-z]{2})$ ]]; then
+      local op="${BASH_REMATCH[1]}"
+      local reg="${BASH_REMATCH[2]}"
+      
+      # Get register value
+      local reg_val="${!regs_ref}[$reg]"
+      
+      local modrm
+      case "$op" in
+        inc) modrm=$((0xc0 + reg_val)) ;;
+        dec) modrm=$((0xc8 + reg_val)) ;;
+        *) return 1 ;;
+      esac
+      
+      printf "48%s%02x" "$opcode" "$modrm"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_neg_reg() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local regs_ref="$4"
+    
+    if [[ "$line" =~ ^$instruction[[:space:]]+r([a-z]{2})$ ]]; then
+      local reg="${BASH_REMATCH[1]}"
+      
+      # Get register value
+      local reg_val="${!regs_ref}[$reg]"
+      
+      # Calculate MODR/M byte (op_ext = 3 for neg)
+      local modrm=$((0xc0 | (3 << 3) | reg_val))
+      
+      printf "48%s%02x" "$opcode" "$modrm"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_mul_div_reg() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local regs_ref="$4"
+    
+    if [[ "$line" =~ ^($instruction)[[:space:]]+r([a-z]{2})$ ]]; then
+      local op="${BASH_REMATCH[1]}"
+      local reg="${BASH_REMATCH[2]}"
+      
+      # Get register value
+      local reg_val="${!regs_ref}[$reg]"
+      
+      # Calculate MODR/M byte (op_ext varies by operation)
+      local op_ext=0
+      case "$op" in
+        mul) op_ext=4 ;;
+        div) op_ext=6 ;;
+        idiv) op_ext=7 ;;
+        *) return 1 ;;
+      esac
+      
+      local modrm=$((0xc0 | (op_ext << 3) | reg_val))
+      
+      printf "48%s%02x" "$opcode" "$modrm"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_imul_reg_reg() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local regs_ref="$4"
+    
+    if [[ "$line" =~ ^$instruction[[:space:]]+r([a-z]{2}),[[:space:]]+r([a-z]{2})$ ]]; then
+      local src_reg="${BASH_REMATCH[1]}"
+      local dst_reg="${BASH_REMATCH[2]}"
+      
+      # Get register values
+      local reg_src_val="${!regs_ref}[$src_reg]"
+      local reg_dst_val="${!regs_ref}[$dst_reg]"
+      
+      # Calculate MODR/M byte
+      local modrm=$((0xc0 | (reg_src_val << 3) | reg_dst_val))
+      
+      printf "48%s%02x" "$opcode" "$modrm"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_shift_reg_imm8() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local regs_ref="$4"
+    
+    if [[ "$line" =~ ^($instruction)[[:space:]]+r([a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
+      local op="${BASH_REMATCH[1]}"
+      local reg="${BASH_REMATCH[2]}"
+      local imm="${BASH_REMATCH[3]}"
+      
+      # Get register value
+      local reg_val="${!regs_ref}[$reg]"
+      
+      # Calculate MODR/M byte (op_ext varies by operation)
+      local op_ext=0
+      case "$op" in
+        shl) op_ext=4 ;;
+        shr) op_ext=5 ;;
+        *) return 1 ;;
+      esac
+      
+      local modrm=$((0xc0 | (op_ext << 3) | reg_val))
+      
+      printf "48%s%02x%02x" "$opcode" "$modrm" "$imm"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_test_reg_reg() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local regs_ref="$4"
+    
+    if [[ "$line" =~ ^$instruction[[:space:]]+r([a-z]{2}),[[:space:]]+r([a-z]{2})$ ]]; then
+      local src_reg="${BASH_REMATCH[1]}"
+      local dst_reg="${BASH_REMATCH[2]}"
+      
+      # Get register values
+      local reg_src_val="${!regs_ref}[$src_reg]"
+      local reg_dst_val="${!regs_ref}[$dst_reg]"
+      
+      # Calculate MODR/M byte
+      local modrm=$((0xc0 | (reg_src_val << 3) | reg_dst_val))
+      
+      printf "48%s%02x" "$opcode" "$modrm"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_test_reg_imm32() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local regs_ref="$4"
+    
+    if [[ "$line" =~ ^$instruction[[:space:]]+r([a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
+      local reg="${BASH_REMATCH[1]}"
+      local imm="${BASH_REMATCH[2]}"
+      
+      # Get register value
+      local reg_val="${!regs_ref}[$reg]"
+      
+      # Parse immediate value
+      local val
+      if [[ "$imm" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+        val=$((16#${BASH_REMATCH[1]}))
+      else
+        val=$((imm))
+      fi
+      
+      # Calculate MODR/M byte
+      local modrm=$((0xc0 | reg_val))
+      
+      printf "48%s%02x" "$opcode" "$modrm"
+      u32le "$val"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_lea_reg_mem() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local regs_ref="$4"
+    local data_vaddr_ref="$5"
+    local text_vaddr_ref="$6"
+    local current_addr="$7"
+    local labels_ref="$8"
+    local data_label_off_ref="$9"
+    
+    if [[ "$line" =~ ^$instruction[[:space:]]+r([a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
+      local reg="${BASH_REMATCH[1]}"
+      local addr_label="${BASH_REMATCH[2]}"
+      
+      # Get register value
+      local reg_val="${!regs_ref}[$reg]"
+      
+      # Get address value based on the label
+      local addr
+      if [[ -n "${!data_label_off_ref}[$addr_label]:-}" ]]; then
+        addr=$(( ${!data_vaddr_ref} + ${!data_label_off_ref}[$addr_label] ))
+      elif [[ -n "${!labels_ref}[$addr_label]:-}" ]]; then
+        addr=$(( ${!text_vaddr_ref} + ${!labels_ref}[$addr_label] ))
+      else
+        return 1  # Unknown label
+      fi
+      
+      # Calculate MODR/M byte with SIB byte and displacement
+      # For [label] addressing, we use Mod=00, R/M=101 (5), which means disp32
+      local modrm=$(((reg_val << 3) | 5))
+      
+      printf "48%s%02x" "$opcode" "$modrm"
+      # Calculate RIP-relative offset (address - (current + 7 bytes for the instruction))
+      local rip_offset=$((addr - (${!text_vaddr_ref} + current_addr + 7)))
+      u32le "$rip_offset"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_push_pop_reg() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local regs_ref="$4"
+    
+    if [[ "$line" =~ ^($instruction)[[:space:]]+r([a-z]{2})$ ]]; then
+      local op="${BASH_REMATCH[1]}"
+      local reg="${BASH_REMATCH[2]}"
+      
+      # Get register value
+      local reg_val="${!regs_ref}[$reg]"
+      
+      # For push, opcode is 0x50 + reg_val, for pop it's 0x58 + reg_val
+      local actual_opcode
+      if [[ "$op" == "push" ]]; then
+        actual_opcode=$((0x50 + reg_val))
+      elif [[ "$op" == "pop" ]]; then
+        actual_opcode=$((0x58 + reg_val))
+      else
+        return 1
+      fi
+      
+      printf "%02x" "$actual_opcode"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_call_rel32() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local labels_ref="$4"
+    local current_addr="$5"
+    
+    if [[ "$line" =~ ^$instruction[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
+      local label="${BASH_REMATCH[1]}"
+      
+      # Get target address from labels
+      if [[ -z "${!labels_ref}[$label]:-}" ]]; then
+        return 1  # Unknown label
+      fi
+      
+      local target_addr="${!labels_ref}[$label]"
+      # Calculate relative offset (target - (current + 5 bytes for the instruction))
+      local offset=$((target_addr - (current_addr + 5)))
+      
+      printf "%s" "$opcode"
+      u32le "$offset"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_jmp_rel8() {
+    local instruction="$1"
+    local opcode="$2"
+    local line="$3"
+    local labels_ref="$4"
+    local current_addr="$5"
+    
+    if [[ "$line" =~ ^($instruction)[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
+      local op="${BASH_REMATCH[1]}"
+      local label="${BASH_REMATCH[2]}"
+      
+      # Get target address from labels
+      if [[ -z "${!labels_ref}[$label]:-}" ]]; then
+        return 1  # Unknown label
+      fi
+      
+      local target_addr="${!labels_ref}[$label]"
+      # Calculate relative offset (target - (current + 2 bytes for the instruction))
+      local offset=$((target_addr - (current_addr + 2)))
+      
+      # Check if offset is within range of a signed 8-bit value (-128 to 127)
+      if (( offset < -128 || offset > 127 )); then
+        return 1  # Jump out of range
+      fi
+      
+      printf "%s%02x" "$opcode" $((offset & 0xff))
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_syscall() {
+    local instruction="$1"
+    local opcode="$2"
+    
+    if [[ "$instruction" == "syscall" ]]; then
+      printf "%s" "$opcode"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_nop() {
+    local instruction="$1"
+    local opcode="$2"
+    
+    if [[ "$instruction" == "nop" ]]; then
+      printf "%s" "$opcode"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  encode_ret() {
+    local instruction="$1"
+    local opcode="$2"
+    
+    if [[ "$instruction" == "ret" ]]; then
+      printf "%s" "$opcode"
+      return 0
+    fi
+    
+    return 1
+  }
+
+  # Main function to encode instruction using definitions
+  encode_instruction() {
+    local line="$1"
+    local current_addr="$2"
+    local data_vaddr="$3"
+    local text_vaddr="$4"
+    local labels_ref="$5"
+    local data_label_off_ref="$6"
+    local equs_ref="$7"
+    local regs_ref="$8"
+    
+    local def_key
+    if def_key=$(match_instruction_to_definition "$line"); then
+      # Extract instruction name and operands from the definition key
+      local instruction="${def_key%,*}"
+      local operands="${def_key#*,}"
+      if [[ "$instruction,$operands" != "$def_key" ]]; then
+        instruction="$def_key"
+        operands=""
+      fi
+      
+      # Extract opcode and encoding type from definition
+      local def_info="${instruction_defs[$def_key]}"
+      local opcode="${def_info% *}"
+      local encoding_type="${def_info#* }"
+      
+      # Call the appropriate encoding handler based on the encoding type
+      case "$encoding_type" in
+        reg_to_reg)
+          encode_reg_to_reg "$instruction" "$opcode" "$line" "$regs_ref"
+          ;;
+        reg_to_imm32)
+          encode_reg_to_imm32 "$instruction" "$opcode" "$line" "$regs_ref"
+          ;;
+        reg_to_imm64)
+          encode_reg_to_imm64 "$instruction" "$opcode" "$line" "$regs_ref" "data_vaddr" "text_vaddr" "$labels_ref" "$data_label_off_ref" "$equs_ref"
+          ;;
+        rax_add_imm32|rax_sub_imm32|rax_cmp_imm32|rax_or_imm32|rax_and_imm32)
+          encode_rax_add_imm32 "$instruction" "$opcode" "$line" "$regs_ref"
+          ;;
+        reg_add_imm8|reg_sub_imm8|reg_cmp_imm8|reg_or_imm8|reg_and_imm8)
+          encode_reg_add_imm8 "$instruction" "$opcode" "$line" "$regs_ref"
+          ;;
+        inc_dec_reg)
+          encode_inc_dec_reg "$instruction" "$opcode" "$line" "$regs_ref"
+          ;;
+        neg_reg)
+          encode_neg_reg "$instruction" "$opcode" "$line" "$regs_ref"
+          ;;
+        mul_div_reg)
+          encode_mul_div_reg "$instruction" "$opcode" "$line" "$regs_ref"
+          ;;
+        imul_reg_reg)
+          encode_imul_reg_reg "$instruction" "$opcode" "$line" "$regs_ref"
+          ;;
+        shift_reg_imm8)
+          encode_shift_reg_imm8 "$instruction" "$opcode" "$line" "$regs_ref"
+          ;;
+        test_reg_reg)
+          encode_test_reg_reg "$instruction" "$opcode" "$line" "$regs_ref"
+          ;;
+        test_reg_imm32)
+          encode_test_reg_imm32 "$instruction" "$opcode" "$line" "$regs_ref"
+          ;;
+        lea_reg_mem)
+          encode_lea_reg_mem "$instruction" "$opcode" "$line" "$regs_ref" "data_vaddr" "text_vaddr" "$current_addr" "$labels_ref" "$data_label_off_ref"
+          ;;
+        push_pop_reg)
+          encode_push_pop_reg "$instruction" "$opcode" "$line" "$regs_ref"
+          ;;
+        call_rel32)
+          encode_call_rel32 "$instruction" "$opcode" "$line" "$labels_ref" "$current_addr"
+          ;;
+        jmp_rel8)
+          encode_jmp_rel8 "$instruction" "$opcode" "$line" "$labels_ref" "$current_addr"
+          ;;
+        syscall)
+          encode_syscall "$instruction" "$opcode"
+          ;;
+        nop)
+          encode_nop "$instruction" "$opcode"
+          ;;
+        ret)
+          encode_ret "$instruction" "$opcode"
+          ;;
+        *)
+          echo "unsupported encoding type: $encoding_type" >&2
+          return 1
+          ;;
+      esac
+      
+      return $?
+    else
+      echo "unknown instruction: $line" >&2
+      return 1
+    fi
+  }
+
+  mapfile -t lines <<<"$code_str"
+
+  declare -A labels
+  declare -A data_label_off
+  declare -A equs
+  declare -A regs
+  regs["rax"]=0
+  regs["rcx"]=1
+  regs["rdx"]=2
+  regs["rbx"]=3
+  regs["rsp"]=4
+  regs["rbp"]=5
+  regs["rsi"]=6
+  regs["rdi"]=7
+
+  data_bytes=""
+  text_ins=()
+  text_bytes_len=0
+  in_section=""
+
+  for raw in "${lines[@]}"; do
+    line="${raw%%;*}"
+    line="$(trim_string "$line")"
+    [ -z "$line" ] && continue
+    case "$line" in
+    section\ .data)
+      in_section="data"
+      continue
+      ;;
+    section\ .text)
+      in_section="text"
+      continue
+      ;;
+    global\ *) continue ;;
+    esac
+
+    if [[ "$in_section" == "data" ]]; then
+      if [[ "$line" =~ ^([A-Za-z0-9_]+)[[:space:]]+equ[[:space:]]+\$[[:space:]]*-[[:space:]]*([A-Za-z0-9_]+)[[:space:]]*$ ]]; then
+        name="${BASH_REMATCH[1]}"
+        ref="${BASH_REMATCH[2]}"
+        if [[ -z "${data_label_off[$ref]:-}" ]]; then
+          echo "unknown equ ref $ref" >&2
+          return 1
+        fi
+        cur_off=$((${#data_bytes} / 2))
+        val=$((cur_off - data_label_off[$ref]))
+        equs["$name"]=$val
+        continue
+      fi
+
+      if [[ "$line" =~ ^([a-zA-Z0-9_]+):?[[:space:]]+db[[:space:]]+\"(.*)\"([[:space:]]*,[[:space:]]*([0-9]+))?[[:space:]]*$ ]]; then
+        name="${BASH_REMATCH[1]}"
+        txt="${BASH_REMATCH[2]}"
+        extra="${BASH_REMATCH[4]}"
+        # Process escape sequences using pure bash
+        txt="${txt//\\/\\\\x5c}"  # Replace \ with \\x5c
+        txt="${txt//
+/\\n}"      # Replace newlines with \n
+        txt="${txt//\"/\\\"}"     # Replace " with \"
+        hex=""
+        i=0
+        while [ $i -lt ${#txt} ]; do
+          ch="${txt:i:1}"
+          oc=$(printf "%d" "'$ch")
+          hex+="$(printf "%02x" $oc)"
+          i=$((i + 1))
+        done
+        if [ -n "$extra" ]; then
+          hex+="$(printf "%02x" $extra)"
+        fi
+        data_label_off["$name"]=$((${#data_bytes} / 2))
+        data_bytes+="$hex"
+        continue
+      fi
+
+      echo "unsupported data line: $line" >&2
+      return 1
+    elif [[ "$in_section" == "text" ]]; then
+      if [[ "$line" =~ ^([.a-zA-Z0-9_]+):$ ]]; then
+        lbl="${BASH_REMATCH[1]}"
+        labels["$lbl"]="$text_bytes_len"
+        continue
+      fi
+      text_ins+=("$line")
+      # Get the size of this instruction
+      if size=$(get_instruction_size "$line"); then
+        text_bytes_len=$((text_bytes_len + size))
+      else
+        echo "unsupported instruction: $line" >&2
+        return 1
+      fi
+    else
+      echo "no section for: $line" >&2
+      return 1
+    fi
+  done
+
+  base_vaddr=0x400000
+  file_text_off=0x200 # increased to avoid header overflow
+  code_size=$text_bytes_len
+  data_size=$((${#data_bytes} / 2))
+  file_data_off=$((file_text_off + code_size))
+  text_vaddr=$((base_vaddr + file_text_off))
+  data_vaddr=$((base_vaddr + file_data_off))
+  entry_vaddr=$text_vaddr
+  if [[ -n "${labels[_start]:-}" ]]; then
+    entry_vaddr=$((text_vaddr + labels[_start]))
+  fi
+
+  text_hex=""
+  current_address=0
+  for line in "${text_ins[@]}"; do
+    if encoded=$(encode_instruction "$line" "$current_address" "$data_vaddr" "$text_vaddr" "labels" "data_label_off" "equs" "regs"); then
+      text_hex+="$encoded"
+      # Get the size of this instruction to update current address
+      if size=$(get_instruction_size "$line"); then
+        current_address=$((current_address + size))
+      else
+        echo "could not determine instruction size for: $line" >&2
+        return 1
+      fi
+    else
+      echo "failed to encode instruction: $line" >&2
+      return 1
+    fi
+  done
+
+  tmpf="$(mktemp)"
+
+  header_hex=""
+  header_hex+="7f454c46"
+  header_hex+="02"
+  header_hex+="01"
+  header_hex+="01"
+  header_hex+="00"
+  header_hex+="0000000000000000"
+  header_hex+="0200"
+  header_hex+="3e00"
+  header_hex+="01000000"
+  header_hex+="$(u64le $entry_vaddr)"
+  header_hex+="$(u64le 0x40)"
+  header_hex+="$(u64le 0)"
+  header_hex+="00000000"
+  header_hex+="4000"
+  header_hex+="3800"
+  header_hex+="0100"
+  header_hex+="0000"
+  header_hex+="0000"
+  header_hex+="0000"
+
+  header_hex+="$(u32le 1)"
+  header_hex+="$(u32le 5)"
+  header_hex+="$(u64le $file_text_off)"
+  header_hex+="$(u64le $text_vaddr)"
+  header_hex+="$(u64le $text_vaddr)"
+  filesz=$((file_data_off + data_size))
+  header_hex+="$(u64le $filesz)"
+  header_hex+="$(u64le $filesz)"
+  header_hex+="$(u64le 0x200000)"
+
+  hex_to_bin "$header_hex" >"$tmpf"
+
+  # Calculate expected header size from hex string length (each 2 hex chars = 1 byte)
+  cur_size=$((${#header_hex} / 2))
+  if ((cur_size > file_text_off)); then
+    echo "header too big" >&2
+    return 1
+  fi
+  pad=$((file_text_off - cur_size))
+  generate_zeros "$pad" >>"$tmpf"
+
+  hex_to_bin "$text_hex" >>"$tmpf"
+  hex_to_bin "$data_bytes" >>"$tmpf"
+
+  # Calculate expected total size: header + padding + text + data
+  text_size=$((${#text_hex} / 2))
+  data_size=$((${#data_bytes} / 2))
+  actual_size=$((file_text_off + text_size + data_size))
+  
+  if [ "$actual_size" -ne "$filesz" ]; then
+    filesz=$actual_size
+    seek=$((0x38))
+    pf="$(u64le $filesz)$(u64le $filesz)"
+    # Create a temporary file with the binary data, then write at specific offset using pure bash
+    local temp_bin
+    temp_bin=$(mktemp)
+    hex_to_bin "$pf" > "$temp_bin"
+    write_at_offset "$temp_bin" "$tmpf" "$seek"
+    rm -f "$temp_bin"
+  fi
+
+  chmod +x "$tmpf"
+  mv -f "$tmpf" "$outfile"
+  return 0
+}
