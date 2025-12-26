@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 
+# Helper function to trim leading and trailing whitespace from a string
+trim_string() {
+  local str="$1"
+  # Remove leading whitespace
+  str="${str#"${str%%[![:space:]]*}"}"
+  # Remove trailing whitespace
+  str="${str%"${str##*[![:space:]]}"}"
+  echo "$str"
+}
+
 # Load instruction definitions from file
 load_instruction_defs() {
   local defs_file="$1"
@@ -18,12 +28,12 @@ load_instruction_defs() {
     # Parse line: instruction,operands,opcode,size,encoding_rule
     IFS=',' read -r instruction operands opcode size encoding_rule <<<"$line"
 
-    # Remove leading/trailing whitespace
-    instruction=$(echo "$instruction" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    operands=$(echo "$operands" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    opcode=$(echo "$opcode" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    size=$(echo "$size" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    encoding_rule=$(echo "$encoding_rule" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    # Remove leading/trailing whitespace using pure bash
+    instruction=$(trim_string "$instruction")
+    operands=$(trim_string "$operands")
+    opcode=$(trim_string "$opcode")
+    size=$(trim_string "$size")
+    encoding_rule=$(trim_string "$encoding_rule")
 
     # Store in associative arrays
     instruction_defs["$instruction,$operands"]="$opcode $encoding_rule"
@@ -214,7 +224,7 @@ basm_assemble() {
 
   for raw in "${lines[@]}"; do
     line="${raw%%;*}"
-    line="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    line="$(trim_string "$line")"
     [ -z "$line" ] && continue
     case "$line" in
     section\ .data)
@@ -246,8 +256,11 @@ basm_assemble() {
         name="${BASH_REMATCH[1]}"
         txt="${BASH_REMATCH[2]}"
         extra="${BASH_REMATCH[4]}"
-        txt="$(echo -n "$txt" | sed -e 's/\\/\\\\x5c/g' -e 's/\n/\
-/g' -e 's/"/"/g')"
+        # Process escape sequences using pure bash
+        txt="${txt//\\/\\\\x5c}"  # Replace \ with \\x5c
+        txt="${txt//
+/\\n}"      # Replace newlines with \n
+        txt="${txt//\"/\\\"}"     # Replace " with \"
         hex=""
         i=0
         while [ $i -lt ${#txt} ]; do

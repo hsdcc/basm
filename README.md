@@ -27,4 +27,3 @@ run the built-in tests:
 ```bash
 ./src/basm.sh test
 ```
-
