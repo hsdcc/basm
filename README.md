@@ -30,4 +30,4 @@ run the built-in tests:
 
 ## for people trying to contribute
 
-[CONTEXT.MD](CONTEXT.MD)
+[CONTEXT.md](CONTEXT.md)
