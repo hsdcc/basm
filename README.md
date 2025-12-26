@@ -27,3 +27,7 @@ run the built-in tests:
 ```bash
 ./src/basm.sh test
 ```
+
+## for people trying to contribute
+
+[CONTEXT.MD](CONTEXT.MD)
