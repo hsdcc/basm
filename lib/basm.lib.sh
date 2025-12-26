@@ -28,6 +28,55 @@ hex_to_bin() {
   done
 }
 
+# Helper function to generate padding zeros
+generate_zeros() {
+  local count="$1"
+  local i
+  for ((i = 0; i < count; i++)); do
+    printf "\\x00"
+  done
+}
+
+# Helper function to write data at specific offset in a file
+write_at_offset() {
+  local src_file="$1"    # Source file containing data to write
+  local dest_file="$2"   # Destination file to write to
+  local offset="$3"      # Byte offset to write at
+  
+  # Read the source file content
+  local src_content
+  src_content=$(< "$src_file")
+  
+  # Read the destination file content
+  local dest_content
+  if [[ -f "$dest_file" ]]; then
+    dest_content=$(< "$dest_file")
+  else
+    dest_content=""
+  fi
+  
+  # Ensure destination is at least 'offset' bytes long by padding with nulls if necessary
+  local current_len=${#dest_content}
+  local padded_content="$dest_content"
+  if (( current_len < offset )); then
+    local padding_len=$((offset - current_len))
+    local i
+    for ((i = 0; i < padding_len; i++)); do
+      padded_content+=$'\0'
+    done
+  fi
+  
+  # Calculate where to place the source content
+  local prefix="${padded_content:0:offset}"
+  local suffix="${padded_content:offset}"
+  
+  # Combine: prefix + src_content + suffix
+  local result="$prefix$src_content$suffix"
+  
+  # Write the combined content back to the destination file
+  printf '%s' "$result" > "$dest_file"
+}
+
 # Load instruction definitions from file
 load_instruction_defs() {
   local defs_file="$1"
@@ -1311,7 +1360,7 @@ basm_assemble() {
     return 1
   fi
   pad=$((file_text_off - cur_size))
-  dd if=/dev/zero bs=1 count=$pad 2>/dev/null >>"$tmpf"
+  generate_zeros "$pad" >>"$tmpf"
 
   hex_to_bin "$text_hex" >>"$tmpf"
   hex_to_bin "$data_bytes" >>"$tmpf"
@@ -1325,11 +1374,11 @@ basm_assemble() {
     filesz=$actual_size
     seek=$((0x38))
     pf="$(u64le $filesz)$(u64le $filesz)"
-    # Create a temporary file with the binary data, then use dd to write at specific offset
+    # Create a temporary file with the binary data, then write at specific offset using pure bash
     local temp_bin
     temp_bin=$(mktemp)
     hex_to_bin "$pf" > "$temp_bin"
-    dd if="$temp_bin" of="$tmpf" bs=1 seek=$seek conv=notrunc 2>/dev/null
+    write_at_offset "$temp_bin" "$tmpf" "$seek"
     rm -f "$temp_bin"
   fi
 
