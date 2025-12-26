@@ -10,6 +10,24 @@ trim_string() {
   echo "$str"
 }
 
+# Helper function to convert hex string to binary data
+hex_to_bin() {
+  local hex="$1"
+  local -a bytes
+  local i
+  
+  # Ensure even length hex string
+  if (( ${#hex} % 2 != 0 )); then
+    hex="0$hex"
+  fi
+  
+  # Split hex string into byte pairs and convert to binary
+  for ((i = 0; i < ${#hex}; i += 2)); do
+    local byte="${hex:$i:2}"
+    printf "\\x$byte"
+  done
+}
+
 # Load instruction definitions from file
 load_instruction_defs() {
   local defs_file="$1"
@@ -1284,7 +1302,7 @@ basm_assemble() {
   header_hex+="$(u64le $filesz)"
   header_hex+="$(u64le 0x200000)"
 
-  echo -n "$header_hex" | xxd -r -p >"$tmpf"
+  hex_to_bin "$header_hex" >"$tmpf"
 
   cur_size=$(stat -c%s "$tmpf")
   if ((cur_size > file_text_off)); then
@@ -1294,15 +1312,20 @@ basm_assemble() {
   pad=$((file_text_off - cur_size))
   dd if=/dev/zero bs=1 count=$pad 2>/dev/null >>"$tmpf"
 
-  echo -n "$text_hex" | xxd -r -p >>"$tmpf"
-  echo -n "$data_bytes" | xxd -r -p >>"$tmpf"
+  hex_to_bin "$text_hex" >>"$tmpf"
+  hex_to_bin "$data_bytes" >>"$tmpf"
 
   actual_size=$(stat -c%s "$tmpf")
   if [ "$actual_size" -ne "$filesz" ]; then
     filesz=$actual_size
     seek=$((0x38))
     pf="$(u64le $filesz)$(u64le $filesz)"
-    echo -n "$pf" | xxd -r -p | dd of="$tmpf" bs=1 seek=$seek conv=notrunc 2>/dev/null
+    # Create a temporary file with the binary data, then use dd to write at specific offset
+    local temp_bin
+    temp_bin=$(mktemp)
+    hex_to_bin "$pf" > "$temp_bin"
+    dd if="$temp_bin" of="$tmpf" bs=1 seek=$seek conv=notrunc 2>/dev/null
+    rm -f "$temp_bin"
   fi
 
   chmod +x "$tmpf"
