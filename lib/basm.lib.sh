@@ -1304,7 +1304,8 @@ basm_assemble() {
 
   hex_to_bin "$header_hex" >"$tmpf"
 
-  cur_size=$(stat -c%s "$tmpf")
+  # Calculate expected header size from hex string length (each 2 hex chars = 1 byte)
+  cur_size=$((${#header_hex} / 2))
   if ((cur_size > file_text_off)); then
     echo "header too big" >&2
     return 1
@@ -1315,7 +1316,11 @@ basm_assemble() {
   hex_to_bin "$text_hex" >>"$tmpf"
   hex_to_bin "$data_bytes" >>"$tmpf"
 
-  actual_size=$(stat -c%s "$tmpf")
+  # Calculate expected total size: header + padding + text + data
+  text_size=$((${#text_hex} / 2))
+  data_size=$((${#data_bytes} / 2))
+  actual_size=$((file_text_off + text_size + data_size))
+  
   if [ "$actual_size" -ne "$filesz" ]; then
     filesz=$actual_size
     seek=$((0x38))
