@@ -84,10 +84,12 @@ basm_assemble() {
   # No longer loading instruction definitions from external file
   # All instruction encodings are hardcoded directly in this file
 
+  # convert number to little-endian 32-bit hex
   u32le() {
     local n=$1
     printf "%02x%02x%02x%02x" $((n & 0xff)) $(((n >> 8) & 0xff)) $(((n >> 16) & 0xff)) $(((n >> 24) & 0xff))
   }
+  # convert number to little-endian 64-bit hex
   u64le() {
     local n=$1
     local b0=$((n & 0xff))
@@ -106,6 +108,7 @@ basm_assemble() {
   declare -A labels
   declare -A data_label_off
   declare -A equs
+  # register encoding map for modrm byte
   declare -A regs
   regs["rax"]=0
   regs["rcx"]=1
@@ -116,7 +119,7 @@ basm_assemble() {
   regs["rsi"]=6
   regs["rdi"]=7
 
-  # Helper to get register number from any register name (al, rax, eax, etc)
+  # helper to get register number for byte registers too
   get_reg_num() {
     local reg="$1"
     case "$reg" in
@@ -140,7 +143,7 @@ basm_assemble() {
   text_ins=()
   text_bytes_len=0
   in_section=""
-
+  # first pass: parse instructions, calculate sizes, collect labels
   for raw in "${lines[@]}"; do
     line="${raw%%;*}"
     line="$(trim_string "$line")"
@@ -356,7 +359,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
     entry_vaddr=$((text_vaddr + labels[_start]))
   fi
 
-
+  # second pass: generate machine code hex for each instruction
   text_hex=""
   current_address=0
   for line in "${text_ins[@]}"; do
@@ -366,15 +369,16 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
       modrm=$((0xc0 + regs[$src] * 8 + regs[$dst]))
       text_hex+=$(printf "4889%02x" $modrm)
       current_address=$((current_address + 3))
-    elif [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+\[(r[a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
-      dst="${BASH_REMATCH[1]}"
-      base="${BASH_REMATCH[2]}"
-      disp="${BASH_REMATCH[3]:-}"
-      mod=0
-      need_sib=0
-      if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
-        need_sib=1
-      fi
+     elif [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+\[(r[a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
+       dst="${BASH_REMATCH[1]}"
+       base="${BASH_REMATCH[2]}"
+       disp="${BASH_REMATCH[3]:-}"
+       # calculate modrm based on displacement presence and size
+       mod=0
+       need_sib=0
+       if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+         need_sib=1
+       fi
       if [[ -z "$disp" ]]; then
         if [[ "$base" == "rbp" || "$base" == "r13" ]]; then
           mod=1
@@ -775,7 +779,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
   done
 
   tmpf="$(mktemp)"
-
+  # build elf header in hex
   header_hex=""
   header_hex+="7f454c46"
   header_hex+="02"
