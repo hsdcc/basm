@@ -83,11 +83,11 @@ the current basm assembler supports basic x86_64 instructions sufficient for sim
 
 **control flow**
 
-- [ ] `jecxz` - jump if ecx is zero
-- [ ] `jrcxz` - jump if rcx is zero
+- [x] `jecxz` - jump if ecx is zero (implemented as part of loop)
+- [x] `jrcxz` - jump if rcx is zero (implemented as part of loop)
 - [ ] `cmovcc` - conditional moves (cmove, cmovne, cmova, cmovae, etc.)
 - [ ] `setcc` - set byte on condition (sete, setne, seta, setae, etc.)
-- [ ] `loop`, `loope`, `loopne` - loop instructions
+- [x] `loop`, `loope`, `loopne` - loop instructions
 - [ ] `syscall`, `sysret` - system call instructions
 - [ ] `int`, `iret` - software interrupt instructions
 

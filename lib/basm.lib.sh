@@ -224,6 +224,8 @@ basm_assemble() {
         text_bytes_len=$((text_bytes_len + 3))
       elif [[ "$line" =~ ^(push|pop)[[:space:]]+(r[a-z]{2})$ ]]; then
         text_bytes_len=$((text_bytes_len + 1))
+      elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
+        text_bytes_len=$((text_bytes_len + 3))
       elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]*(.*)$ ]]; then
         reg="${BASH_REMATCH[2]}"
         arg="${BASH_REMATCH[3]}"
@@ -239,6 +241,10 @@ basm_assemble() {
       elif [[ "$line" =~ ^(j|J) ]]; then
         text_bytes_len=$((text_bytes_len + 2))
       elif [[ "$line" =~ ^loop ]]; then
+        text_bytes_len=$((text_bytes_len + 2))
+      elif [[ "$line" =~ ^loope ]]; then
+        text_bytes_len=$((text_bytes_len + 2))
+      elif [[ "$line" =~ ^loopne ]]; then
         text_bytes_len=$((text_bytes_len + 2))
       elif [[ "$line" =~ ^(inc|dec|neg)[[:space:]]+(r[a-z]{2})$ ]]; then
         text_bytes_len=$((text_bytes_len + 3))
@@ -351,6 +357,19 @@ basm_assemble() {
       op=$((0x58 + regs[$reg]))
       text_hex+=$(printf "%02x" $op)
       current_address=$((current_address + 1))
+    elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
+      op="${BASH_REMATCH[1]}"
+      reg1="${BASH_REMATCH[2]}"
+      reg2="${BASH_REMATCH[3]}"
+      modrm=$((0xc0 | (regs[$reg2] << 3) | regs[$reg1]))
+      case "$op" in
+      add) text_hex+=$(printf "4801%02x" $modrm) ;;
+      sub) text_hex+=$(printf "4829%02x" $modrm) ;;
+      and) text_hex+=$(printf "4821%02x" $modrm) ;;
+      or) text_hex+=$(printf "4809%02x" $modrm) ;;
+      cmp) text_hex+=$(printf "4839%02x" $modrm) ;;
+      esac
+      current_address=$((current_address + 3))
     elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]*(.*)$ ]]; then
       op="${BASH_REMATCH[1]}"
       reg="${BASH_REMATCH[2]}"
@@ -425,8 +444,9 @@ basm_assemble() {
       jmp) text_hex+="eb$offset_hex" ;;
       esac
       current_address=$((current_address + 2))
-    elif [[ "$line" =~ ^loop[[:space:]]+(.*)$ ]]; then
-      lbl="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ ^(loop|loope|loopne)[[:space:]]+(.*)$ ]]; then
+      op="${BASH_REMATCH[1]}"
+      lbl="${BASH_REMATCH[2]}"
       if [[ -z "${labels[$lbl]:-}" ]]; then
         echo "unknown label $lbl" >&2
         return 1
@@ -438,7 +458,11 @@ basm_assemble() {
         return 1
       fi
       offset_hex=$(printf "%02x" $((offset & 0xff)))
-      text_hex+="e2$offset_hex"
+      case "$op" in
+      loop) text_hex+="e2$offset_hex" ;;
+      loope) text_hex+="e1$offset_hex" ;;
+      loopne) text_hex+="e0$offset_hex" ;;
+      esac
       current_address=$((current_address + 2))
     elif [[ "$line" =~ ^(inc|dec|neg)[[:space:]]+(r[a-z]{2})$ ]]; then
       op="${BASH_REMATCH[1]}"
