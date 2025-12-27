@@ -83,6 +83,7 @@ basm_assemble() {
 
 	local equ_pattern='^([A-Za-z0-9_]+)[[:space:]]+equ[[:space:]]+\$[[:space:]]*-[[:space:]]*([A-Za-z0-9_]+)[[:space:]]*$'
 	local db_pattern='^([a-zA-Z0-9_]+):?[[:space:]]+db[[:space:]]+\"(.*)\"([[:space:]]*,[[:space:]]*([0-9]+))?[[:space:]]*$'
+	local dq_pattern='^([a-zA-Z0-9_]+):?[[:space:]]+dq[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$'
 	local label_pattern='^([.a-zA-Z0-9_]+):$'
 	local mov_rr_pattern='^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$'
 	local mov_ri_pattern='^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(.*)$'
@@ -99,7 +100,7 @@ basm_assemble() {
 	local call_pattern='^call[[:space:]]+([.a-zA-Z0-9_]+)$'
 	local mul_pattern='^(mul|div|idiv)[[:space:]]+(r[a-z]{2})$'
 	local imul_pattern='^imul[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$'
-	local lea_pattern='^lea[[:space:]]+(r[a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$'
+	local lea_pattern='^lea[[:space:]]+(r[a-z]+),[[:space:]]+\[([a-zA-Z0-9_]+)\]$'
 	local shift_pattern='^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$'
 	local test_rr_pattern='^test[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$'
 	local test_ri_pattern='^test[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$'
@@ -107,6 +108,20 @@ basm_assemble() {
 	local movsxd_pattern='^movsxd[[:space:]]+(r[a-z]{2}),[[:space:]]+([er][a-z]{2})$'
 	local setcc_pattern='^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$'
 	local cmov_pattern='^cmov(e|ne|a|ae|b|be|g|ge|l|le|o|no|s|ns|p|np)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$'
+
+	# floating point patterns
+	local movss_rr_pattern='^movss[[:space:]]+(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	local movsd_rr_pattern='^movsd[[:space:]]+(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	local addss_rr_pattern='^addss[[:space:]]+(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	local addsd_rr_pattern='^addsd[[:space:]]+(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	local mulss_rr_pattern='^mulss[[:space:]]+(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	local mulsd_rr_pattern='^mulsd[[:space:]]+(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	local subss_rr_pattern='^subss[[:space:]]+(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	local subsd_rr_pattern='^subsd[[:space:]]+(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	local divss_rr_pattern='^divss[[:space:]]+(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	local divsd_rr_pattern='^divsd[[:space:]]+(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	local movsd_mem_pattern='^movsd[[:space:]]+(xmm[0-9]+),[[:space:]]+\[(r[a-z]+)\]$'
+	local cvtsd2si_pattern='^cvtsd2si[[:space:]]+(r[a-z]{2}),[[:space:]]+(xmm[0-9]+)$'
 
 	# No longer loading instruction definitions from external file
 	# All instruction encodings are hardcoded directly in this file
@@ -145,6 +160,25 @@ basm_assemble() {
 	regs["rbp"]=5
 	regs["rsi"]=6
 	regs["rdi"]=7
+
+	# xmm registers for floating point
+	declare -A xmm_regs
+	xmm_regs["xmm0"]=0
+	xmm_regs["xmm1"]=1
+	xmm_regs["xmm2"]=2
+	xmm_regs["xmm3"]=3
+	xmm_regs["xmm4"]=4
+	xmm_regs["xmm5"]=5
+	xmm_regs["xmm6"]=6
+	xmm_regs["xmm7"]=7
+	xmm_regs["xmm8"]=8
+	xmm_regs["xmm9"]=9
+	xmm_regs["xmm10"]=10
+	xmm_regs["xmm11"]=11
+	xmm_regs["xmm12"]=12
+	xmm_regs["xmm13"]=13
+	xmm_regs["xmm14"]=14
+	xmm_regs["xmm15"]=15
 
 	# helper to get register number for byte registers too
 	get_reg_num() {
@@ -224,6 +258,19 @@ basm_assemble() {
 				fi
 				data_label_off["$name"]=$((${#data_bytes} / 2))
 				data_bytes+="$hex"
+				continue
+			fi
+
+			if [[ "$line" =~ $dq_pattern ]]; then
+				name="${BASH_REMATCH[1]}"
+				val="${BASH_REMATCH[2]}"
+				if [[ "$val" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+					val=$((16#${BASH_REMATCH[1]}))
+				else
+					val=$((val))
+				fi
+				data_label_off["$name"]=$((${#data_bytes} / 2))
+				data_bytes+=$(u64le $val)
 				continue
 			fi
 
@@ -401,8 +448,33 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 				text_bytes_len=$((text_bytes_len + 3))
 			elif [[ "$line" =~ $cmov_pattern ]]; then
 				text_bytes_len=$((text_bytes_len + 4))
-			
-			
+
+			# floating point instructions
+			elif [[ "$line" =~ $movss_rr_pattern ]]; then
+				text_bytes_len=$((text_bytes_len + 4))
+			elif [[ "$line" =~ $movsd_rr_pattern ]]; then
+				text_bytes_len=$((text_bytes_len + 4))
+			elif [[ "$line" =~ $addss_rr_pattern ]]; then
+				text_bytes_len=$((text_bytes_len + 4))
+			elif [[ "$line" =~ $addsd_rr_pattern ]]; then
+				text_bytes_len=$((text_bytes_len + 4))
+			elif [[ "$line" =~ $mulss_rr_pattern ]]; then
+				text_bytes_len=$((text_bytes_len + 4))
+			elif [[ "$line" =~ $mulsd_rr_pattern ]]; then
+				text_bytes_len=$((text_bytes_len + 4))
+			elif [[ "$line" =~ $subss_rr_pattern ]]; then
+				text_bytes_len=$((text_bytes_len + 4))
+			elif [[ "$line" =~ $subsd_rr_pattern ]]; then
+				text_bytes_len=$((text_bytes_len + 4))
+			elif [[ "$line" =~ $divss_rr_pattern ]]; then
+				text_bytes_len=$((text_bytes_len + 4))
+			elif [[ "$line" =~ $divsd_rr_pattern ]]; then
+				text_bytes_len=$((text_bytes_len + 4))
+			elif [[ "$line" =~ $movsd_mem_pattern ]]; then
+				text_bytes_len=$((text_bytes_len + 4))
+			elif [[ "$line" =~ $cvtsd2si_pattern ]]; then
+				text_bytes_len=$((text_bytes_len + 4))
+
 			else
 				echo "unsupported instruction: $line" >&2
 				return 1
@@ -1070,6 +1142,78 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 			modrm=$((0xc0 | (regs[$dst] << 3) | regs[$src]))
 			text_hex+="48"
 			text_hex+=$(printf "0f%02x%02x" $cc $modrm)
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $movss_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f30f10$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $movsd_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f20f10$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $addss_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f30f58$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $addsd_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f20f58$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $mulss_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f30f59$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $mulsd_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f20f59$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $subss_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f30f5c$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $subsd_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f20f5c$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $divss_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f30f5e$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $divsd_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f20f5e$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $movsd_mem_pattern ]]; then
+			reg="${BASH_REMATCH[1]}"
+			reg2="${BASH_REMATCH[2]}"
+			modrm=$((xmm_regs[$reg] << 3 | regs[$reg2]))
+			text_hex+="f20f10$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $cvtsd2si_pattern ]]; then
+			reg="${BASH_REMATCH[1]}"
+			xmm="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 | regs[$reg] << 3 | xmm_regs[$xmm]))
+			text_hex+="f20f2d$(printf "%02x" $modrm)"
 			current_address=$((current_address + 4))
 		else
 			echo "internal error assembling: $line" >&2

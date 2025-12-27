@@ -74,7 +74,7 @@ assert_output() {
 # Function to extract expected value from asm file comment
 get_expected_from_asm() {
 	local asm_file="$1"
-	local expected=$(head -n 5 "$asm_file" | grep -E '; expect:' | head -n 1 | sed 's/.*; expect:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+	local expected=$(grep -E '; expect:' "$asm_file" | head -n 1 | sed 's/.*; expect:[[:space:]]*//' | sed 's/[[:space:]]*$//')
 	echo "$expected"
 }
 
