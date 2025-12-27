@@ -268,6 +268,8 @@ basm_assemble() {
         text_bytes_len=$((text_bytes_len + 4))
       elif [[ "$line" =~ ^movsxd[[:space:]]+(r[a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
         text_bytes_len=$((text_bytes_len + 3))
+      elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
+        text_bytes_len=$((text_bytes_len + 3))
       else
         echo "unsupported instruction: $line" >&2
         return 1
@@ -572,6 +574,29 @@ basm_assemble() {
       src_reg=$(get_reg_num "$src")
       modrm=$((0xc0 | (dst_reg << 3) | src_reg))
       text_hex+=$(printf "4863%02x" $modrm)
+      current_address=$((current_address + 3))
+    elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
+      cond="${BASH_REMATCH[1]}"
+      dst="${BASH_REMATCH[2]}"
+      dst_reg=$(get_reg_num "$dst")
+      modrm=$((0xc0 | dst_reg))
+      
+      case "$cond" in
+      e|z) text_hex+=$(printf "0f94%02x" $modrm) ;;
+      ne|nz) text_hex+=$(printf "0f95%02x" $modrm) ;;
+      a) text_hex+=$(printf "0f97%02x" $modrm) ;;
+      ae) text_hex+=$(printf "0f93%02x" $modrm) ;;
+      b) text_hex+=$(printf "0f92%02x" $modrm) ;;
+      be) text_hex+=$(printf "0f96%02x" $modrm) ;;
+      g) text_hex+=$(printf "0f9f%02x" $modrm) ;;
+      ge) text_hex+=$(printf "0f9d%02x" $modrm) ;;
+      l) text_hex+=$(printf "0f9c%02x" $modrm) ;;
+      le) text_hex+=$(printf "0f9e%02x" $modrm) ;;
+      o) text_hex+=$(printf "0f90%02x" $modrm) ;;
+      no) text_hex+=$(printf "0f91%02x" $modrm) ;;
+      s) text_hex+=$(printf "0f98%02x" $modrm) ;;
+      ns) text_hex+=$(printf "0f99%02x" $modrm) ;;
+      esac
       current_address=$((current_address + 3))
     else
       echo "internal error assembling: $line" >&2
