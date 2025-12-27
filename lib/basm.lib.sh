@@ -116,6 +116,26 @@ basm_assemble() {
   regs["rsi"]=6
   regs["rdi"]=7
 
+  # Helper to get register number from any register name (al, rax, eax, etc)
+  get_reg_num() {
+    local reg="$1"
+    case "$reg" in
+      al|rax|eax) echo 0 ;;
+      cl|rcx|ecx) echo 1 ;;
+      dl|rdx|edx) echo 2 ;;
+      bl|rbx|ebx) echo 3 ;;
+      spl|rsp|esp) echo 4 ;;
+      bpl|rbp|ebp) echo 5 ;;
+      sil|rsi|esi) echo 6 ;;
+      dil|rdi|edi) echo 7 ;;
+      ah) echo 4 ;;
+      ch) echo 5 ;;
+      dh) echo 6 ;;
+      bh) echo 7 ;;
+      *) echo -1 ;;
+    esac
+  }
+
   data_bytes=""
   text_ins=()
   text_bytes_len=0
@@ -236,6 +256,12 @@ basm_assemble() {
         text_bytes_len=$((text_bytes_len + 3))
       elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
         text_bytes_len=$((text_bytes_len + 7))
+      elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+(r[a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh])$ ]]; then
+        text_bytes_len=$((text_bytes_len + 4))
+      elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
+        text_bytes_len=$((text_bytes_len + 4))
+      elif [[ "$line" =~ ^movsxd[[:space:]]+(r[a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
+        text_bytes_len=$((text_bytes_len + 3))
       else
         echo "unsupported instruction: $line" >&2
         return 1
@@ -502,6 +528,27 @@ basm_assemble() {
       modrm=$((0xc0 | regs[$reg]))
       text_hex+=$(printf "48f7%02x" $modrm)$(u32le $val)
       current_address=$((current_address + 7))
+    elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+(r[a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
+      op="${BASH_REMATCH[1]}"
+      dst="${BASH_REMATCH[2]}"
+      src="${BASH_REMATCH[3]}"
+      dst_reg=$(get_reg_num "$dst")
+      src_reg=$(get_reg_num "$src")
+      modrm=$((0xc0 | (dst_reg << 3) | src_reg))
+      if [[ "$op" == "movzx" ]]; then
+        text_hex+=$(printf "480fb6%02x" $modrm)
+      else
+        text_hex+=$(printf "480fbe%02x" $modrm)
+      fi
+      current_address=$((current_address + 4))
+    elif [[ "$line" =~ ^movsxd[[:space:]]+(r[a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
+      dst="${BASH_REMATCH[1]}"
+      src="${BASH_REMATCH[2]}"
+      dst_reg=$(get_reg_num "$dst")
+      src_reg=$(get_reg_num "$src")
+      modrm=$((0xc0 | (dst_reg << 3) | src_reg))
+      text_hex+=$(printf "4863%02x" $modrm)
+      current_address=$((current_address + 3))
     else
       echo "internal error assembling: $line" >&2
       return 1

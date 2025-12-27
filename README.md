@@ -72,9 +72,9 @@ the current basm assembler supports basic x86_64 instructions sufficient for sim
 
 **memory and addressing**
 
-- [ ] `movzx` - move with zero extension (byte/word to dword/qword)
-- [ ] `movsx` - move with sign extension
-- [ ] `movsxd` - move sign-extended dword to qword
+- [x] `movzx` - move with zero extension (byte/word to dword/qword)
+- [x] `movsx` - move with sign extension
+- [x] `movsxd` - move sign-extended dword to qword
 - [ ] `lea r64, [base + index*scale + displacement]` - complex addressing modes
 - [ ] `movsb`, `movsw`, `movsd`, `movsq` - string operations
 - [ ] `stosb`, `stosw`, `stosd`, `stosq` - store string operations
