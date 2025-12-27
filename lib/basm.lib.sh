@@ -77,47 +77,12 @@ write_at_offset() {
   printf '%s' "$result" > "$dest_file"
 }
 
-# Load instruction definitions from file
-load_instruction_defs() {
-  local defs_file="$1"
-  declare -gA instruction_defs  # Global associative array for instruction definitions
-  declare -gA instruction_sizes # Global associative array for instruction sizes
-
-  if [[ ! -f "$defs_file" ]]; then
-    echo "instruction definitions file not found: $defs_file" >&2
-    return 1
-  fi
-
-  while IFS= read -r line; do
-    # Skip empty lines and comments
-    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-
-    # Parse line: instruction,operands,opcode,size,encoding_rule
-    IFS=',' read -r instruction operands opcode size encoding_rule <<<"$line"
-
-    # Remove leading/trailing whitespace using pure bash
-    instruction=$(trim_string "$instruction")
-    operands=$(trim_string "$operands")
-    opcode=$(trim_string "$opcode")
-    size=$(trim_string "$size")
-    encoding_rule=$(trim_string "$encoding_rule")
-
-    # Store in associative arrays
-    instruction_defs["$instruction,$operands"]="$opcode $encoding_rule"
-    instruction_sizes["$instruction,$operands"]="$size"
-  done <"$defs_file"
-}
-
 basm_assemble() {
   local code_str="${1:-""]}"
   local outfile="${2:-a.out}"
 
-  # Load instruction definitions
-  local defs_file="${BASH_SOURCE%/*}/../chipsets/x86_64_comprehensive.def"
-  if ! load_instruction_defs "$defs_file"; then
-    echo "failed to load instruction definitions" >&2
-    return 1
-  fi
+  # No longer loading instruction definitions from external file
+  # All instruction encodings are hardcoded directly in this file
 
   u32le() {
     local n=$1
