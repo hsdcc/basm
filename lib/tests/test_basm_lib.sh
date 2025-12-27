@@ -1,74 +1,74 @@
 #!/usr/bin/env bash
-set -eu
+set -u
 
 source "$(dirname "$0")/../basm.lib.sh"
 
 assert_exit_code() {
-  local test_name="$1"
-  local asm_file="$2"
-  local expected_exit_code="$3"
+	local test_name="$1"
+	local asm_file="$2"
+	local expected_exit_code="$3"
 
-  echo "  testing $test_name"
+	echo "	testing $test_name"
 
-  local executable
-  executable="$(mktemp)"
+	local executable
+	executable="$(mktemp)"
 
-  local asm_code
-  asm_code=$(< "$asm_file")
+	local asm_code
+	asm_code=$(< "$asm_file")
 
-  if ! basm_assemble "$asm_code" "$executable"; then
-    echo "  [FAIL] $test_name: asm failed."
-    rm -f "$executable"
-    return 1
-  fi
+	if ! basm_assemble "$asm_code" "$executable"; then
+		echo "	[FAIL] $test_name: asm failed."
+		rm -f "$executable"
+		return 1
+	fi
 
-  set +e
-  "$executable"
-  local actual_exit_code=$?
-  set -e
+	set +e
+	"$executable"
+	local actual_exit_code=$?
+	set -e
 
-  if [ "$actual_exit_code" -ne "$expected_exit_code" ]; then
-    echo "  [FAIL] $test_name: Exited with status code $actual_exit_code, expected $expected_exit_code."
-    rm -f "$executable"
-    return 1
-  fi
+	if (( actual_exit_code != expected_exit_code )); then
+		echo "	[FAIL] $test_name: Exited with status code $actual_exit_code, expected $expected_exit_code."
+		rm -f "$executable"
+		return 1
+	fi
 
-  echo "  [PASS] $test_name"
-  rm -f "$executable"
-  return 0
+	echo "	[PASS] $test_name"
+	rm -f "$executable"
+	return 0
 }
 
 assert_output() {
-  local test_name="$1"
-  local asm_file="$2"
-  local expected_output="$3"
+	local test_name="$1"
+	local asm_file="$2"
+	local expected_output="$3"
 
-  echo "  testing $test_name"
+	echo "	testing $test_name"
 
-  local executable
-  executable="$(mktemp)"
+	local executable
+	executable="$(mktemp)"
 
-  local asm_code
-  asm_code=$(< "$asm_file")
+	local asm_code
+	asm_code=$(< "$asm_file")
 
-  if ! basm_assemble "$asm_code" "$executable"; then
-    echo "  [FAIL] $test_name: asm failed."
-    rm -f "$executable"
-    return 1
-  fi
+	if ! basm_assemble "$asm_code" "$executable"; then
+		echo "	[FAIL] $test_name: asm failed."
+		rm -f "$executable"
+		return 1
+	fi
 
-  local output
-  output=$("$executable")
+	local output
+	output=$("$executable")
 
-  if [ "$output" != "$expected_output" ]; then
-    echo "  [FAIL] $test_name: unexpected output: '$output'"
-    rm -f "$executable"
-    return 1
-  fi
+	if [[ "$output" != "$expected_output" ]]; then
+		echo "	[FAIL] $test_name: unexpected output: '$output'"
+		rm -f "$executable"
+		return 1
+	fi
 
-  echo "  [PASS] $test_name"
-  rm -f "$executable"
-  return 0
+	echo "	[PASS] $test_name"
+	rm -f "$executable"
+	return 0
 }
 
 failed_tests=0
@@ -97,12 +97,12 @@ assert_exit_code "lib_neg" "$test_asm_dir/lib_neg.asm" 214 || failed_tests=$((fa
 
 
 
-if [ "$failed_tests" -gt 0 ]; then
-  echo
-  echo "$failed_tests test(s) failed."
-  exit 1
+if (( failed_tests > 0 )); then
+	echo
+	echo "$failed_tests test(s) failed."
+	exit 1
 else
-  echo
-  echo "all tests passed. good job."
-  exit 0
+	echo
+	echo "all tests passed. good job."
+	exit 0
 fi
