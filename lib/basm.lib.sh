@@ -287,6 +287,8 @@ elif [[ "$line" == "leave" ]]; then
   text_bytes_len=$((text_bytes_len + 1))
 elif [[ "$line" == "cqo" ]]; then
   text_bytes_len=$((text_bytes_len + 2))
+elif [[ "$line" == "cdqe" ]]; then
+  text_bytes_len=$((text_bytes_len + 2))
 elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
         text_bytes_len=$((text_bytes_len + 3))
       elif [[ "$line" =~ ^(push|pop)[[:space:]]+(r[a-z]{2})$ ]]; then
@@ -511,6 +513,9 @@ elif [[ "$line" == "leave" ]]; then
   current_address=$((current_address + 1))
 elif [[ "$line" == "cqo" ]]; then
   text_hex+="4899"
+  current_address=$((current_address + 2))
+elif [[ "$line" == "cdqe" ]]; then
+  text_hex+="4898"
   current_address=$((current_address + 2))
 elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
       reg="${BASH_REMATCH[1]}"
