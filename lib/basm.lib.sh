@@ -93,7 +93,7 @@ basm_assemble() {
 	local push_pop_pattern='^(push|pop)[[:space:]]+(r[a-z]{2})$'
 	local arith_rr_pattern='^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$'
 	local arith_ri_pattern='^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]*(.*)$'
-	local jump_pattern='^(je|jne|jg|jl|jge|jle|jmp)[[:space:]]+(.*)$'
+	local jump_pattern='^(je|jne|jg|jl|jge|jle|ja|jb|jae|jbe|jo|jno|js|jns|jmp)[[:space:]]+(.*)$'
 	local loop_pattern='^(loop|loope|loopne)[[:space:]]+(.*)$'
 	local unary_pattern='^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$'
 	local call_pattern='^call[[:space:]]+([.a-zA-Z0-9_]+)$'
@@ -304,7 +304,18 @@ basm_assemble() {
 					fi
 					text_bytes_len=$((text_bytes_len + size))
 				elif [[ "$arg" =~ ^[0-9]+$ ]] || [[ "$arg" =~ ^-?[0-9]+$ ]] || [[ "$arg" =~ ^0x[0-9a-fA-F]+$ ]] || [[ -n "${equs[$arg]:-}" ]]; then
-					text_bytes_len=$((text_bytes_len + 7))
+					if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+						val=$((16#${BASH_REMATCH[1]}))
+					elif [[ "$arg" =~ ^-?[0-9]+$ ]]; then
+						val=$((arg))
+					elif [[ -n "${equs[$arg]:-}" ]]; then
+						val=${equs[$arg]}
+					fi
+					if (( val >= -2147483648 && val <= 2147483647 )); then
+						text_bytes_len=$((text_bytes_len + 7))
+					else
+						text_bytes_len=$((text_bytes_len + 10))
+					fi
 				else
 					text_bytes_len=$((text_bytes_len + 10))
 				fi
@@ -563,9 +574,15 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 			fi
 
 			if [[ "$val_is_immediate" -eq 1 ]]; then
-				opcode=$((0xc0 + regs[$reg]))
-				text_hex+=$(printf "48c7%02x" $opcode)$(u32le $val)
-				current_address=$((current_address + 7))
+				if (( val >= -2147483648 && val <= 2147483647 )); then
+					opcode=$((0xc0 + regs[$reg]))
+					text_hex+=$(printf "48c7%02x" $opcode)$(u32le $val)
+					current_address=$((current_address + 7))
+				else
+					op=$((0xb8 + regs[$reg]))
+					text_hex+=$(printf "48%02x" $op)$(u64le $val)
+					current_address=$((current_address + 10))
+				fi
 			else
 				op=$((0xb8 + regs[$reg]))
 				if [[ -n "${data_label_off[$arg]:-}" ]]; then
@@ -729,7 +746,7 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 				text_hex+=$(printf "4883%02x%02x" $modrm $val)
 				current_address=$((current_address + 4))
 			fi
-		elif [[ "$line" =~ ^(je|jne|jg|jl|jge|jle|jmp)[[:space:]]+(.*)$ ]]; then
+		elif [[ "$line" =~ ^(je|jne|jg|jl|jge|jle|ja|jb|jae|jbe|jo|jno|js|jns|jmp)[[:space:]]+(.*)$ ]]; then
 			op="${BASH_REMATCH[1]}"
 			lbl="${BASH_REMATCH[2]}"
 			if [[ -z "${labels[$lbl]:-}" ]]; then
@@ -750,6 +767,14 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 			jl) text_hex+="7c$offset_hex" ;;
 			jge) text_hex+="7d$offset_hex" ;;
 			jle) text_hex+="7e$offset_hex" ;;
+			ja) text_hex+="77$offset_hex" ;;
+			jb) text_hex+="72$offset_hex" ;;
+			jae) text_hex+="73$offset_hex" ;;
+			jbe) text_hex+="76$offset_hex" ;;
+			jo) text_hex+="70$offset_hex" ;;
+			jno) text_hex+="71$offset_hex" ;;
+			js) text_hex+="78$offset_hex" ;;
+			jns) text_hex+="79$offset_hex" ;;
 			jmp) text_hex+="eb$offset_hex" ;;
 			esac
 			current_address=$((current_address + 2))
