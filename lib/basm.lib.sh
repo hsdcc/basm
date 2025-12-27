@@ -310,8 +310,8 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
         text_bytes_len=$((text_bytes_len + 2))
       elif [[ "$line" =~ ^loopne ]]; then
         text_bytes_len=$((text_bytes_len + 2))
-      elif [[ "$line" =~ ^(inc|dec|neg)[[:space:]]+(r[a-z]{2})$ ]]; then
-        text_bytes_len=$((text_bytes_len + 3))
+elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
+  text_bytes_len=$((text_bytes_len + 3))
       elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
         text_bytes_len=$((text_bytes_len + 5))
       elif [[ "$line" =~ ^(mul|div|idiv)[[:space:]]+(r[a-z]{2})$ ]]; then
@@ -630,21 +630,25 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
       loopne) text_hex+="e0$offset_hex" ;;
       esac
       current_address=$((current_address + 2))
-    elif [[ "$line" =~ ^(inc|dec|neg)[[:space:]]+(r[a-z]{2})$ ]]; then
-      op="${BASH_REMATCH[1]}"
-      reg="${BASH_REMATCH[2]}"
-      op_ext=0
-      if [[ "$op" == "inc" ]]; then
-        modrm=$((0xc0 + regs[$reg]))
-        text_hex+=$(printf "48ff%02x" $modrm)
-      elif [[ "$op" == "dec" ]]; then
-        modrm=$((0xc8 + regs[$reg]))
-        text_hex+=$(printf "48ff%02x" $modrm)
-      elif [[ "$op" == "neg" ]]; then
-        op_ext=3
-        modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-        text_hex+=$(printf "48f7%02x" $modrm)
-      fi
+elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
+  op="${BASH_REMATCH[1]}"
+  reg="${BASH_REMATCH[2]}"
+  op_ext=0
+  if [[ "$op" == "inc" ]]; then
+    modrm=$((0xc0 + regs[$reg]))
+    text_hex+=$(printf "48ff%02x" $modrm)
+  elif [[ "$op" == "dec" ]]; then
+    modrm=$((0xc8 + regs[$reg]))
+    text_hex+=$(printf "48ff%02x" $modrm)
+  elif [[ "$op" == "neg" ]]; then
+    op_ext=3
+    modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
+    text_hex+=$(printf "48f7%02x" $modrm)
+  elif [[ "$op" == "not" ]]; then
+    op_ext=2
+    modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
+    text_hex+=$(printf "48f7%02x" $modrm)
+  fi
       current_address=$((current_address + 3))
     elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
       lbl="${BASH_REMATCH[1]}"
