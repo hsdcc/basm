@@ -224,4 +224,3 @@ the current basm assembler supports basic x86_64 instructions sufficient for sim
 - [ ] pipeline stall avoidance
 
 </details>
-
