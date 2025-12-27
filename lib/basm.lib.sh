@@ -209,7 +209,67 @@ basm_assemble() {
         text_bytes_len=$((text_bytes_len + 3))
       elif [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(.*)$ ]]; then
         arg="${BASH_REMATCH[2]}"
-        if [[ "$arg" =~ ^[0-9]+$ ]] || [[ "$arg" =~ ^-?[0-9]+$ ]] || [[ "$arg" =~ ^0x[0-9a-fA-F]+$ ]] || [[ -n "${equs[$arg]:-}" ]]; then
+        if [[ "$arg" =~ ^\[(r[a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
+          base="${BASH_REMATCH[1]}"
+          disp="${BASH_REMATCH[2]:-}"
+          size=4
+          if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+            if [[ -z "$disp" ]]; then
+              size=4
+            else
+              val=$disp
+              if (( val >= -128 && val <= 127 )); then
+                size=5
+              else
+                size=8
+              fi
+            fi
+          else
+            if [[ -z "$disp" ]]; then
+              size=3
+            elif [[ "$base" == "rbp" || "$base" == "r13" ]]; then
+              size=4
+            else
+              val=$disp
+              if (( val >= -128 && val <= 127 )); then
+                size=4
+              else
+                size=7
+              fi
+            fi
+          fi
+          text_bytes_len=$((text_bytes_len + size))
+        elif [[ "$arg" =~ ^\[(r[a-z]{2})([\+\-][0-9]+)?\],[[:space:]]+(r[a-z]{2})$ ]]; then
+          base="${BASH_REMATCH[1]}"
+          disp="${BASH_REMATCH[2]:-}"
+          size=4
+          if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+            if [[ -z "$disp" ]]; then
+              size=4
+            else
+              val=$disp
+              if (( val >= -128 && val <= 127 )); then
+                size=5
+              else
+                size=8
+              fi
+            fi
+          else
+            if [[ -z "$disp" ]]; then
+              size=3
+            elif [[ "$base" == "rbp" || "$base" == "r13" ]]; then
+              size=4
+            else
+              val=$disp
+              if (( val >= -128 && val <= 127 )); then
+                size=4
+              else
+                size=7
+              fi
+            fi
+          fi
+          text_bytes_len=$((text_bytes_len + size))
+        elif [[ "$arg" =~ ^[0-9]+$ ]] || [[ "$arg" =~ ^-?[0-9]+$ ]] || [[ "$arg" =~ ^0x[0-9a-fA-F]+$ ]] || [[ -n "${equs[$arg]:-}" ]]; then
           text_bytes_len=$((text_bytes_len + 7))
         else
           text_bytes_len=$((text_bytes_len + 10))
@@ -218,9 +278,11 @@ basm_assemble() {
         text_bytes_len=$((text_bytes_len + 2))
       elif [[ "$line" == "nop" ]]; then
         text_bytes_len=$((text_bytes_len + 1))
-      elif [[ "$line" == "ret" ]]; then
-        text_bytes_len=$((text_bytes_len + 1))
-      elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
+elif [[ "$line" == "ret" ]]; then
+  text_bytes_len=$((text_bytes_len + 1))
+elif [[ "$line" == "leave" ]]; then
+  text_bytes_len=$((text_bytes_len + 1))
+elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
         text_bytes_len=$((text_bytes_len + 3))
       elif [[ "$line" =~ ^(push|pop)[[:space:]]+(r[a-z]{2})$ ]]; then
         text_bytes_len=$((text_bytes_len + 1))
@@ -302,6 +364,100 @@ basm_assemble() {
       modrm=$((0xc0 + regs[$src] * 8 + regs[$dst]))
       text_hex+=$(printf "4889%02x" $modrm)
       current_address=$((current_address + 3))
+    elif [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+\[(r[a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
+      dst="${BASH_REMATCH[1]}"
+      base="${BASH_REMATCH[2]}"
+      disp="${BASH_REMATCH[3]:-}"
+      mod=0
+      need_sib=0
+      if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+        need_sib=1
+      fi
+      if [[ -z "$disp" ]]; then
+        if [[ "$base" == "rbp" || "$base" == "r13" ]]; then
+          mod=1
+          disp="0"
+        fi
+      else
+        if [[ "$disp" =~ ^[\+\-]?[0-9]+$ ]]; then
+          val=$disp
+          if (( val >= -128 && val <= 127 )); then
+            mod=1
+          else
+            mod=2
+          fi
+        fi
+      fi
+      if [[ $need_sib -eq 1 ]]; then
+        rm=4
+      else
+        rm=${regs[$base]}
+      fi
+      modrm=$((mod * 64 + ${regs[$dst]} * 8 + rm))
+      text_hex+="488b"
+      text_hex+=$(printf "%02x" $modrm)
+      if [[ $need_sib -eq 1 ]]; then
+        sib=$((0 * 64 + 4 * 8 + ${regs[$base]}))
+        text_hex+=$(printf "%02x" $sib)
+      fi
+      if [[ -n "$disp" && "$disp" != "0" ]]; then
+        if [[ $mod -eq 1 ]]; then
+          text_hex+=$(printf "%02x" $((disp & 0xff)))
+        else
+          text_hex+=$(u32le $disp)
+        fi
+      fi
+      if [[ $mod -eq 0 && ($base == "rbp" || $base == "r13") ]]; then
+        text_hex+="00"
+      fi
+      current_address=$((current_address + 4))
+    elif [[ "$line" =~ ^mov[[:space:]]+\[(r[a-z]{2})([\+\-][0-9]+)?\],[[:space:]]+(r[a-z]{2})$ ]]; then
+      base="${BASH_REMATCH[1]}"
+      disp="${BASH_REMATCH[2]:-}"
+      dst="${BASH_REMATCH[3]}"
+      mod=0
+      need_sib=0
+      if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+        need_sib=1
+      fi
+      if [[ -z "$disp" ]]; then
+        if [[ "$base" == "rbp" || "$base" == "r13" ]]; then
+          mod=1
+          disp="0"
+        fi
+      else
+        if [[ "$disp" =~ ^[\+\-]?[0-9]+$ ]]; then
+          val=$disp
+          if (( val >= -128 && val <= 127 )); then
+            mod=1
+          else
+            mod=2
+          fi
+        fi
+      fi
+      if [[ $need_sib -eq 1 ]]; then
+        rm=4
+      else
+        rm=${regs[$base]}
+      fi
+      modrm=$((mod * 64 + regs[$dst] * 8 + rm))
+      text_hex+="4889"
+      text_hex+=$(printf "%02x" $modrm)
+      if [[ $need_sib -eq 1 ]]; then
+        sib=$((0 * 64 + 4 * 8 + ${regs[$base]}))
+        text_hex+=$(printf "%02x" $sib)
+      fi
+      if [[ -n "$disp" && "$disp" != "0" ]]; then
+        if [[ $mod -eq 1 ]]; then
+          text_hex+=$(printf "%02x" $((disp & 0xff)))
+        else
+          text_hex+=$(u32le $disp)
+        fi
+      fi
+      if [[ $mod -eq 0 && ($base == "rbp" || $base == "r13") ]]; then
+        text_hex+="00"
+      fi
+      current_address=$((current_address + 4))
     elif [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(.*)$ ]]; then
       reg="${BASH_REMATCH[1]}"
       arg="${BASH_REMATCH[2]}"
@@ -341,10 +497,13 @@ basm_assemble() {
     elif [[ "$line" == "nop" ]]; then
       text_hex+="90"
       current_address=$((current_address + 1))
-    elif [[ "$line" == "ret" ]]; then
-      text_hex+="c3"
-      current_address=$((current_address + 1))
-    elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
+elif [[ "$line" == "ret" ]]; then
+  text_hex+="c3"
+  current_address=$((current_address + 1))
+elif [[ "$line" == "leave" ]]; then
+  text_hex+="c9"
+  current_address=$((current_address + 1))
+elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
       reg="${BASH_REMATCH[1]}"
       modrm=$((0xc0 + regs[$reg] * 8 + regs[$reg]))
       text_hex+=$(printf "4831%02x" $modrm)
