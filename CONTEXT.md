@@ -20,3 +20,5 @@ the system loads these definitions into associative arrays and uses them to enco
 - `basm.sh` - main entry point that takes input .asm and output file
 - `basm.lib.sh` - core assembly logic with all the parsing and encoding
 - `.def` files - instruction definitions that map assembly ops to machine code
+
+**nothing** should be hardcoded in the scripts - all instruction data must come from the .def files.
