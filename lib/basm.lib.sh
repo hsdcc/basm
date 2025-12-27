@@ -320,8 +320,8 @@ elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
         text_bytes_len=$((text_bytes_len + 4))
       elif [[ "$line" =~ ^lea[[:space:]]+(r[a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
         text_bytes_len=$((text_bytes_len + 7))
-      elif [[ "$line" =~ ^(shl|shr)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
-        text_bytes_len=$((text_bytes_len + 4))
+elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
+  text_bytes_len=$((text_bytes_len + 4))
       elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
         text_bytes_len=$((text_bytes_len + 3))
       elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
@@ -692,18 +692,20 @@ elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
       offset=$((addr - (text_vaddr + current_address + 7)))
       text_hex+=$(u32le $offset)
       current_address=$((current_address + 7))
-    elif [[ "$line" =~ ^(shl|shr)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
-      op="${BASH_REMATCH[1]}"
-      reg="${BASH_REMATCH[2]}"
-      val="${BASH_REMATCH[3]}"
-      op_ext=0
-      if [[ "$op" == "shl" ]]; then
-        op_ext=4
-      else
-        op_ext=5
-      fi
-      modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-      text_hex+=$(printf "48c1%02x%02x" $modrm $val)
+elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
+  op="${BASH_REMATCH[1]}"
+  reg="${BASH_REMATCH[2]}"
+  val="${BASH_REMATCH[3]}"
+  op_ext=0
+  if [[ "$op" == "shl" ]]; then
+    op_ext=4
+  elif [[ "$op" == "shr" ]]; then
+    op_ext=5
+  elif [[ "$op" == "sar" ]]; then
+    op_ext=7
+  fi
+  modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
+  text_hex+=$(printf "48c1%02x%02x" $modrm $val)
       current_address=$((current_address + 4))
     elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
       reg1="${BASH_REMATCH[1]}"
