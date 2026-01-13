@@ -41,7 +41,7 @@ generate_zeros() {
 write_at_offset() {
 	local src_file="$1"		 # Source file containing data to write
 	local dest_file="$2"	 # Destination file to write to
-	local offset="$3"			 # Byte offset to write at
+	local offset="$3"			 # Byte offset to write at write at
 	
 	# Read the source file content
 	local src_content
@@ -75,6 +75,26 @@ write_at_offset() {
 	
 	# Write the combined content back to the destination file
 	printf '%s' "$result" > "$dest_file"
+}
+
+# convert number to little-endian 32-bit hex
+u32le() {
+	local n=$1
+	printf "%02x%02x%02x%02x" $((n & 0xff)) $(((n >> 8) & 0xff)) $(((n >> 16) & 0xff)) $(((n >> 24) & 0xff))
+}
+
+# convert number to little-endian 64-bit hex
+u64le() {
+	local n=$1
+	local b0=$((n & 0xff))
+	local b1=$(((n >> 8) & 0xff))
+	local b2=$(((n >> 16) & 0xff))
+	local b3=$(((n >> 24) & 0xff))
+	local b4=$(((n >> 32) & 0xff))
+	local b5=$(((n >> 40) & 0xff))
+	local b6=$(((n >> 48) & 0xff))
+	local b7=$(((n >> 56) & 0xff))
+	printf "%02x%02x%02x%02x%02x%02x%02x%02x" $b0 $b1 $b2 $b3 $b4 $b5 $b6 $b7
 }
 
 basm_assemble() {
@@ -125,25 +145,6 @@ basm_assemble() {
 
 	# No longer loading instruction definitions from external file
 	# All instruction encodings are hardcoded directly in this file
-
-	# convert number to little-endian 32-bit hex
-	u32le() {
-		local n=$1
-		printf "%02x%02x%02x%02x" $((n & 0xff)) $(((n >> 8) & 0xff)) $(((n >> 16) & 0xff)) $(((n >> 24) & 0xff))
-	}
-	# convert number to little-endian 64-bit hex
-	u64le() {
-		local n=$1
-		local b0=$((n & 0xff))
-		local b1=$(((n >> 8) & 0xff))
-		local b2=$(((n >> 16) & 0xff))
-		local b3=$(((n >> 24) & 0xff))
-		local b4=$(((n >> 32) & 0xff))
-		local b5=$(((n >> 40) & 0xff))
-		local b6=$(((n >> 48) & 0xff))
-		local b7=$(((n >> 56) & 0xff))
-		printf "%02x%02x%02x%02x%02x%02x%02x%02x" $b0 $b1 $b2 $b3 $b4 $b5 $b6 $b7
-	}
 
 	mapfile -t lines <<<"$code_str"
 
@@ -205,7 +206,9 @@ basm_assemble() {
 	text_bytes_len=0
 	in_section=""
 	# first pass: parse instructions, calculate sizes, collect labels
+	line_number=0
 	for raw in "${lines[@]}"; do
+		line_number=$((line_number + 1))
 		line="${raw%%;*}"
 		line="$(trim_string "$line")"
 		[ -z "$line" ] && continue
@@ -227,7 +230,7 @@ basm_assemble() {
 				name="${BASH_REMATCH[1]}"
 				ref="${BASH_REMATCH[2]}"
 				if [[ -z "${data_label_off[$ref]:-}" ]]; then
-					echo "unknown equ ref $ref" >&2
+					echo "error at line $line_number: unknown equ reference '$ref' - label not defined in .data section" >&2
 					return 1
 				fi
 				cur_off=$((${#data_bytes} / 2))
@@ -247,14 +250,14 @@ basm_assemble() {
 				txt="${txt//\"/\\\"}"			# Replace " with \"
 				hex=""
 				i=0
-				while [ $i -lt ${#txt} ]; do
+				while [ "$i" -lt ${#txt} ]; do
 					ch="${txt:i:1}"
 					oc=$(printf "%d" "'$ch")
-					hex+="$(printf "%02x" $oc)"
+					hex+="$(printf "%02x" "$oc")"
 					i=$((i + 1))
 				done
 				if [ -n "$extra" ]; then
-					hex+="$(printf "%02x" $extra)"
+					hex+="$(printf "%02x" "$extra")"
 				fi
 				data_label_off["$name"]=$((${#data_bytes} / 2))
 				data_bytes+="$hex"
@@ -274,7 +277,8 @@ basm_assemble() {
 				continue
 			fi
 
-			echo "unsupported data line: $line" >&2
+			echo "error at line $line_number: unsupported data line format: '$line'" >&2
+			echo "supported formats: label db \"string\", label dq number, label equ \$-ref" >&2
 			return 1
 		elif [[ "$in_section" == "text" ]]; then
 			if [[ "$line" =~ ^([.a-zA-Z0-9_]+):$ ]]; then
@@ -380,17 +384,11 @@ elif [[ "$line" == "cdqe" ]]; then
 	text_bytes_len=$((text_bytes_len + 2))
 elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
 				text_bytes_len=$((text_bytes_len + 3))
-			elif [[ "$line" =~ $cmov_pattern ]]; then
-				text_bytes_len=$((text_bytes_len + 4))
-			
 			elif [[ "$line" =~ ^(push|pop)[[:space:]]+(r[a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 1))
 			elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 3))
-			elif [[ "$line" =~ $cmov_pattern ]]; then
-				text_bytes_len=$((text_bytes_len + 4))
-			
-			elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]*(.*)$ ]]; then
+						elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]*(.*)$ ]]; then
 				reg="${BASH_REMATCH[2]}"
 				arg="${BASH_REMATCH[3]}"
 				if [[ "$reg" == "rax" ]]; then
@@ -412,17 +410,11 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 				text_bytes_len=$((text_bytes_len + 2))
 elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
 	text_bytes_len=$((text_bytes_len + 3))
-			elif [[ "$line" =~ $cmov_pattern ]]; then
-				text_bytes_len=$((text_bytes_len + 4))
-			
-			elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
+						elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
 				text_bytes_len=$((text_bytes_len + 5))
 			elif [[ "$line" =~ ^(mul|div|idiv)[[:space:]]+(r[a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 3))
-			elif [[ "$line" =~ $cmov_pattern ]]; then
-				text_bytes_len=$((text_bytes_len + 4))
-			
-			elif [[ "$line" =~ ^(imul)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
+						elif [[ "$line" =~ ^(imul)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 4))
 			elif [[ "$line" =~ ^lea[[:space:]]+(r[a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
 				text_bytes_len=$((text_bytes_len + 7))
@@ -430,10 +422,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 	text_bytes_len=$((text_bytes_len + 4))
 			elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 3))
-			elif [[ "$line" =~ $cmov_pattern ]]; then
-				text_bytes_len=$((text_bytes_len + 4))
-			
-			elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
+						elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
 				text_bytes_len=$((text_bytes_len + 7))
 			elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+(r[a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh])$ ]]; then
 				text_bytes_len=$((text_bytes_len + 4))
@@ -441,15 +430,9 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 				text_bytes_len=$((text_bytes_len + 4))
 			elif [[ "$line" =~ ^movsxd[[:space:]]+(r[a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 3))
-			elif [[ "$line" =~ $cmov_pattern ]]; then
-				text_bytes_len=$((text_bytes_len + 4))
-			
-			elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
+						elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 3))
-			elif [[ "$line" =~ $cmov_pattern ]]; then
-				text_bytes_len=$((text_bytes_len + 4))
-
-			# floating point instructions
+						# floating point instructions
 			elif [[ "$line" =~ $movss_rr_pattern ]]; then
 				text_bytes_len=$((text_bytes_len + 4))
 			elif [[ "$line" =~ $movsd_rr_pattern ]]; then
@@ -476,11 +459,13 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 				text_bytes_len=$((text_bytes_len + 4))
 
 			else
-				echo "unsupported instruction: $line" >&2
+				echo "error: unsupported instruction: '$line'" >&2
+				echo "supported instructions: mov, add, sub, cmp, xor, and, or, push, pop, inc, dec, neg, not, call, ret, jmp, je, jne, jg, jl, jge, jle, ja, jb, jae, jbe, jo, jno, js, jns, lea, imul, mul, div, idiv, test, setcc, cmovcc, movzx, movsx, movsxd, shl, shr, sar, and floating point ops" >&2
 				return 1
 			fi
 		else
-			echo "no section for: $line" >&2
+			echo "error at line $line_number: instruction outside of section: '$line'" >&2
+			echo "hint: make sure your code is inside 'section .text' or 'section .data'" >&2
 			return 1
 		fi
 	done
@@ -505,7 +490,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 			dst="${BASH_REMATCH[1]}"
 			src="${BASH_REMATCH[2]}"
 			modrm=$((0xc0 + regs[$src] * 8 + regs[$dst]))
-			text_hex+=$(printf "4889%02x" $modrm)
+			text_hex+=$(printf "4889%02x" "$modrm")
 			current_address=$((current_address + 3))
 		elif [[ "$line" =~ $cmov_pattern ]]; then
 			cond="${BASH_REMATCH[1]}"
@@ -532,7 +517,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 			esac
 			modrm=$((0xc0 | (regs[$dst] << 3) | regs[$src]))
 			text_hex+="48"
-			text_hex+=$(printf "0f%02x%02x" $cc $modrm)
+			text_hex+=$(printf "0f%02x%02x" "$cc" "$modrm")
 			current_address=$((current_address + 4))
 		 elif [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+\[(r[a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
 			 dst="${BASH_REMATCH[1]}"
@@ -566,7 +551,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 			fi
 			modrm=$((mod * 64 + ${regs[$dst]} * 8 + rm))
 			text_hex+="488b"
-			text_hex+=$(printf "%02x" $modrm)
+			text_hex+=$(printf "%02x" "$modrm")
 			if [[ $need_sib -eq 1 ]]; then
 				sib=$((0 * 64 + 4 * 8 + ${regs[$base]}))
 				text_hex+=$(printf "%02x" $sib)
@@ -575,7 +560,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 				if [[ $mod -eq 1 ]]; then
 					text_hex+=$(printf "%02x" $((disp & 0xff)))
 				else
-					text_hex+=$(u32le $disp)
+					text_hex+=$(u32le "$disp")
 				fi
 			fi
 			if [[ $mod -eq 0 && ($base == "rbp" || $base == "r13") ]]; then
@@ -613,7 +598,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 			fi
 			modrm=$((mod * 64 + regs[$dst] * 8 + rm))
 			text_hex+="4889"
-			text_hex+=$(printf "%02x" $modrm)
+			text_hex+=$(printf "%02x" "$modrm")
 			if [[ $need_sib -eq 1 ]]; then
 				sib=$((0 * 64 + 4 * 8 + ${regs[$base]}))
 				text_hex+=$(printf "%02x" $sib)
@@ -622,7 +607,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 				if [[ $mod -eq 1 ]]; then
 					text_hex+=$(printf "%02x" $((disp & 0xff)))
 				else
-					text_hex+=$(u32le $disp)
+					text_hex+=$(u32le "$disp")
 				fi
 			fi
 			if [[ $mod -eq 0 && ($base == "rbp" || $base == "r13") ]]; then
@@ -633,26 +618,41 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 			reg="${BASH_REMATCH[1]}"
 			arg="${BASH_REMATCH[2]}"
 			local val_is_immediate=0
-			local val # Declare val as local to avoid issues
+			local val
 			if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
 				val=$((16#${BASH_REMATCH[1]}))
+				# Basic validation without output (just to ensure the value fits in bash integer type reasonably)
 				val_is_immediate=1
 			elif [[ "$arg" =~ ^-?[0-9]+$ ]]; then
-				val=$((arg))
-				val_is_immediate=1
+				# Basic validation of integer format
+				if [[ "$arg" =~ ^-?(0|[1-9][0-9]*)$ ]]; then
+					val=$((arg))
+					val_is_immediate=1
+				else
+					echo "error: invalid integer format '$arg'" >&2
+					return 1
+				fi
 			elif [[ -n "${equs[$arg]:-}" ]]; then
 				val=${equs[$arg]}
+				# Check if val is actually numeric
+				if [[ ! "$val" =~ ^-?[0-9]+$ ]]; then
+					echo "error: equ '$arg' resolves to non-numeric value" >&2
+					return 1
+				fi
 				val_is_immediate=1
+			else
+				# arg is a label, not an immediate
+				val_is_immediate=0
 			fi
 
 			if [[ "$val_is_immediate" -eq 1 ]]; then
 				if (( val >= -2147483648 && val <= 2147483647 )); then
 					opcode=$((0xc0 + regs[$reg]))
-					text_hex+=$(printf "48c7%02x" $opcode)$(u32le $val)
+					text_hex+=$(printf "48c7%02x" "$opcode")$(u32le $val)
 					current_address=$((current_address + 7))
 				else
 					op=$((0xb8 + regs[$reg]))
-					text_hex+=$(printf "48%02x" $op)$(u64le $val)
+					text_hex+=$(printf "48%02x" "$op")$(u64le $val)
 					current_address=$((current_address + 10))
 				fi
 			else
@@ -662,10 +662,10 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 				elif [[ -n "${labels[$arg]:-}" ]]; then
 					addr=$((text_vaddr + labels[$arg]))
 				else
-					echo "unknown label $arg" >&2
+					echo "error at line $line_number: unknown label '$arg' in mov instruction '$line'" >&2
 					return 1
 				fi
-				text_hex+=$(printf "48%02x" $op)$(u64le $addr)
+				text_hex+=$(printf "48%02x" "$op")$(u64le $addr)
 				current_address=$((current_address + 10))
 			fi
 		elif [[ "$line" == "syscall" ]]; then
@@ -691,34 +691,7 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 			modrm=$((0xc0 + regs[$reg] * 8 + regs[$reg]))
 			text_hex+=$(printf "4831%02x" $modrm)
 			current_address=$((current_address + 3))
-		elif [[ "$line" =~ $cmov_pattern ]]; then
-			cond="${BASH_REMATCH[1]}"
-			dst="${BASH_REMATCH[2]}"
-			src="${BASH_REMATCH[3]}"
-			case "$cond" in
-			e) cc=0x44 ;;
-			ne) cc=0x45 ;;
-			a) cc=0x47 ;;
-			ae) cc=0x43 ;;
-			b) cc=0x42 ;;
-			be) cc=0x46 ;;
-			g) cc=0x4f ;;
-			ge) cc=0x4d ;;
-			l) cc=0x4c ;;
-			le) cc=0x4e ;;
-			o) cc=0x40 ;;
-			no) cc=0x41 ;;
-			s) cc=0x48 ;;
-			ns) cc=0x49 ;;
-			p) cc=0x4a ;;
-			np) cc=0x4b ;;
-			*) echo "unknown cmov condition $cond" >&2; return 1 ;;
-			esac
-			modrm=$((0xc0 | (regs[$dst] << 3) | regs[$src]))
-			text_hex+="48"
-			text_hex+=$(printf "0f%02x%02x" $cc $modrm)
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ ^push[[:space:]]+(r[a-z]{2})$ ]]; then
+				elif [[ "$line" =~ ^push[[:space:]]+(r[a-z]{2})$ ]]; then
 			reg="${BASH_REMATCH[1]}"
 			op=$((0x50 + regs[$reg]))
 			text_hex+=$(printf "%02x" $op)
@@ -741,34 +714,7 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 			cmp) text_hex+=$(printf "4839%02x" $modrm) ;;
 			esac
 			current_address=$((current_address + 3))
-		elif [[ "$line" =~ $cmov_pattern ]]; then
-			cond="${BASH_REMATCH[1]}"
-			dst="${BASH_REMATCH[2]}"
-			src="${BASH_REMATCH[3]}"
-			case "$cond" in
-			e) cc=0x44 ;;
-			ne) cc=0x45 ;;
-			a) cc=0x47 ;;
-			ae) cc=0x43 ;;
-			b) cc=0x42 ;;
-			be) cc=0x46 ;;
-			g) cc=0x4f ;;
-			ge) cc=0x4d ;;
-			l) cc=0x4c ;;
-			le) cc=0x4e ;;
-			o) cc=0x40 ;;
-			no) cc=0x41 ;;
-			s) cc=0x48 ;;
-			ns) cc=0x49 ;;
-			p) cc=0x4a ;;
-			np) cc=0x4b ;;
-			*) echo "unknown cmov condition $cond" >&2; return 1 ;;
-			esac
-			modrm=$((0xc0 | (regs[$dst] << 3) | regs[$src]))
-			text_hex+="48"
-			text_hex+=$(printf "0f%02x%02x" $cc $modrm)
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]*(.*)$ ]]; then
+				elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]*(.*)$ ]]; then
 			op="${BASH_REMATCH[1]}"
 			reg="${BASH_REMATCH[2]}"
 			arg="${BASH_REMATCH[3]}"
@@ -778,7 +724,7 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 			elif [[ "$arg" =~ ^[0-9]+$ ]]; then
 				val=$((arg))
 			else
-				echo "unknown immediate $arg" >&2
+				echo "error: unknown immediate value '$arg' in '$line'" >&2
 				return 1
 			fi
 
@@ -815,7 +761,7 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 				and) op_ext=4 ;;
 				esac
 				modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-				text_hex+=$(printf "4883%02x%02x" $modrm $val)
+				text_hex+=$(printf "4883%02x%02x" "$modrm" "$val")
 				current_address=$((current_address + 4))
 			fi
 		elif [[ "$line" =~ ^(je|jne|jg|jl|jge|jle|ja|jb|jae|jbe|jo|jno|js|jns|jmp)[[:space:]]+(.*)$ ]]; then
@@ -827,7 +773,7 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 			fi
 			target_address=${labels[$lbl]}
 			offset=$((target_address - (current_address + 2)))
-			if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
+			if [ "$offset" -lt -128 ] || [ "$offset" -gt 127 ]; then
 				echo "short jump out of range: $offset" >&2
 				return 1
 			fi
@@ -859,7 +805,7 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 			fi
 			target_address=${labels[$lbl]}
 			offset=$((target_address - (current_address + 2)))
-			if [ $offset -lt -128 ] || [ $offset -gt 127 ]; then
+			if [ "$offset" -lt -128 ] || [ "$offset" -gt 127 ]; then
 				echo "short jump out of range: $offset" >&2
 				return 1
 			fi
@@ -890,37 +836,10 @@ elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
 		text_hex+=$(printf "48f7%02x" $modrm)
 	fi
 			current_address=$((current_address + 3))
-		elif [[ "$line" =~ $cmov_pattern ]]; then
-			cond="${BASH_REMATCH[1]}"
-			dst="${BASH_REMATCH[2]}"
-			src="${BASH_REMATCH[3]}"
-			case "$cond" in
-			e) cc=0x44 ;;
-			ne) cc=0x45 ;;
-			a) cc=0x47 ;;
-			ae) cc=0x43 ;;
-			b) cc=0x42 ;;
-			be) cc=0x46 ;;
-			g) cc=0x4f ;;
-			ge) cc=0x4d ;;
-			l) cc=0x4c ;;
-			le) cc=0x4e ;;
-			o) cc=0x40 ;;
-			no) cc=0x41 ;;
-			s) cc=0x48 ;;
-			ns) cc=0x49 ;;
-			p) cc=0x4a ;;
-			np) cc=0x4b ;;
-			*) echo "unknown cmov condition $cond" >&2; return 1 ;;
-			esac
-			modrm=$((0xc0 | (regs[$dst] << 3) | regs[$src]))
-			text_hex+="48"
-			text_hex+=$(printf "0f%02x%02x" $cc $modrm)
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
+				elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
 			lbl="${BASH_REMATCH[1]}"
 			if [[ -z "${labels[$lbl]:-}" ]]; then
-				echo "unknown label $lbl" >&2
+				echo "error: unknown label '$lbl' in call instruction '$line'" >&2
 				return 1
 			fi
 			target_address=${labels[$lbl]}
@@ -939,34 +858,7 @@ elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
 			modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
 			text_hex+=$(printf "48f7%02x" $modrm)
 			current_address=$((current_address + 3))
-		elif [[ "$line" =~ $cmov_pattern ]]; then
-			cond="${BASH_REMATCH[1]}"
-			dst="${BASH_REMATCH[2]}"
-			src="${BASH_REMATCH[3]}"
-			case "$cond" in
-			e) cc=0x44 ;;
-			ne) cc=0x45 ;;
-			a) cc=0x47 ;;
-			ae) cc=0x43 ;;
-			b) cc=0x42 ;;
-			be) cc=0x46 ;;
-			g) cc=0x4f ;;
-			ge) cc=0x4d ;;
-			l) cc=0x4c ;;
-			le) cc=0x4e ;;
-			o) cc=0x40 ;;
-			no) cc=0x41 ;;
-			s) cc=0x48 ;;
-			ns) cc=0x49 ;;
-			p) cc=0x4a ;;
-			np) cc=0x4b ;;
-			*) echo "unknown cmov condition $cond" >&2; return 1 ;;
-			esac
-			modrm=$((0xc0 | (regs[$dst] << 3) | regs[$src]))
-			text_hex+="48"
-			text_hex+=$(printf "0f%02x%02x" $cc $modrm)
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ ^imul[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
+				elif [[ "$line" =~ ^imul[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
 			reg1="${BASH_REMATCH[1]}"
 			reg2="${BASH_REMATCH[2]}"
 			modrm=$((0xc0 | (regs[$reg1] << 3) | regs[$reg2]))
@@ -1007,34 +899,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 			modrm=$((0xc0 | (regs[$reg2] << 3) | regs[$reg1]))
 			text_hex+=$(printf "4885%02x" $modrm)
 			current_address=$((current_address + 3))
-		elif [[ "$line" =~ $cmov_pattern ]]; then
-			cond="${BASH_REMATCH[1]}"
-			dst="${BASH_REMATCH[2]}"
-			src="${BASH_REMATCH[3]}"
-			case "$cond" in
-			e) cc=0x44 ;;
-			ne) cc=0x45 ;;
-			a) cc=0x47 ;;
-			ae) cc=0x43 ;;
-			b) cc=0x42 ;;
-			be) cc=0x46 ;;
-			g) cc=0x4f ;;
-			ge) cc=0x4d ;;
-			l) cc=0x4c ;;
-			le) cc=0x4e ;;
-			o) cc=0x40 ;;
-			no) cc=0x41 ;;
-			s) cc=0x48 ;;
-			ns) cc=0x49 ;;
-			p) cc=0x4a ;;
-			np) cc=0x4b ;;
-			*) echo "unknown cmov condition $cond" >&2; return 1 ;;
-			esac
-			modrm=$((0xc0 | (regs[$dst] << 3) | regs[$src]))
-			text_hex+="48"
-			text_hex+=$(printf "0f%02x%02x" $cc $modrm)
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
+				elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
 			reg="${BASH_REMATCH[1]}"
 			arg="${BASH_REMATCH[2]}"
 			if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
@@ -1043,7 +908,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 				val=$((arg))
 			fi
 			modrm=$((0xc0 | regs[$reg]))
-			text_hex+=$(printf "48f7%02x" $modrm)$(u32le $val)
+			text_hex+=$(printf "48f7%02x" "$modrm")$(u32le "$val")
 			current_address=$((current_address + 7))
 		elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+(r[a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
 			op="${BASH_REMATCH[1]}"
@@ -1066,34 +931,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 			modrm=$((0xc0 | (dst_reg << 3) | src_reg))
 			text_hex+=$(printf "4863%02x" $modrm)
 			current_address=$((current_address + 3))
-		elif [[ "$line" =~ $cmov_pattern ]]; then
-			cond="${BASH_REMATCH[1]}"
-			dst="${BASH_REMATCH[2]}"
-			src="${BASH_REMATCH[3]}"
-			case "$cond" in
-			e) cc=0x44 ;;
-			ne) cc=0x45 ;;
-			a) cc=0x47 ;;
-			ae) cc=0x43 ;;
-			b) cc=0x42 ;;
-			be) cc=0x46 ;;
-			g) cc=0x4f ;;
-			ge) cc=0x4d ;;
-			l) cc=0x4c ;;
-			le) cc=0x4e ;;
-			o) cc=0x40 ;;
-			no) cc=0x41 ;;
-			s) cc=0x48 ;;
-			ns) cc=0x49 ;;
-			p) cc=0x4a ;;
-			np) cc=0x4b ;;
-			*) echo "unknown cmov condition $cond" >&2; return 1 ;;
-			esac
-			modrm=$((0xc0 | (regs[$dst] << 3) | regs[$src]))
-			text_hex+="48"
-			text_hex+=$(printf "0f%02x%02x" $cc $modrm)
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
+				elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
 			cond="${BASH_REMATCH[1]}"
 			dst="${BASH_REMATCH[2]}"
 			dst_reg=$(get_reg_num "$dst")
@@ -1116,34 +954,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 			ns) text_hex+=$(printf "0f99%02x" $modrm) ;;
 			esac
 			current_address=$((current_address + 3))
-		elif [[ "$line" =~ $cmov_pattern ]]; then
-			cond="${BASH_REMATCH[1]}"
-			dst="${BASH_REMATCH[2]}"
-			src="${BASH_REMATCH[3]}"
-			case "$cond" in
-			e) cc=0x44 ;;
-			ne) cc=0x45 ;;
-			a) cc=0x47 ;;
-			ae) cc=0x43 ;;
-			b) cc=0x42 ;;
-			be) cc=0x46 ;;
-			g) cc=0x4f ;;
-			ge) cc=0x4d ;;
-			l) cc=0x4c ;;
-			le) cc=0x4e ;;
-			o) cc=0x40 ;;
-			no) cc=0x41 ;;
-			s) cc=0x48 ;;
-			ns) cc=0x49 ;;
-			p) cc=0x4a ;;
-			np) cc=0x4b ;;
-			*) echo "unknown cmov condition $cond" >&2; return 1 ;;
-			esac
-			modrm=$((0xc0 | (regs[$dst] << 3) | regs[$src]))
-			text_hex+="48"
-			text_hex+=$(printf "0f%02x%02x" $cc $modrm)
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ $movss_rr_pattern ]]; then
+				elif [[ "$line" =~ $movss_rr_pattern ]]; then
 			dst="${BASH_REMATCH[1]}"
 			src="${BASH_REMATCH[2]}"
 			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
@@ -1221,7 +1032,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 		fi
 	done
 
-	tmpf="$(mktemp)"
+	tmpf="$(mktemp)" || { echo "error: failed to create temporary file" >&2; return 1; }
 	# build elf header in hex
 	header_hex=""
 	header_hex+="7f454c46"
@@ -1276,10 +1087,10 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 	if [ "$actual_size" -ne "$filesz" ]; then
 		filesz=$actual_size
 		seek=$((0x38))
-		pf="$(u64le $filesz)$(u64le $filesz)"
+		pf="$(u64le "$filesz")$(u64le "$filesz")"
 		# Create a temporary file with the binary data, then write at specific offset using pure bash
 		local temp_bin
-		temp_bin=$(mktemp)
+		temp_bin=$(mktemp) || { echo "error: failed to create temporary file for patch" >&2; rm -f "$tmpf"; return 1; }
 		hex_to_bin "$pf" > "$temp_bin"
 		write_at_offset "$temp_bin" "$tmpf" "$seek"
 		rm -f "$temp_bin"

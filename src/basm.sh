@@ -19,7 +19,14 @@ if [[ "$infile" == "test" ]]; then
 fi
 
 if [[ -z "$infile" ]]; then
-	echo "usage: $prog input.asm output" >&2
+	echo "usage: $prog input.asm [output]" >&2
+	echo "  input.asm - path to the assembly source file" >&2
+	echo "  output    - optional executable output name (defaults to a.out)" >&2
+	exit 1
+fi
+
+if [[ ! -f "$infile" ]]; then
+	echo "error: input file '$infile' does not exist" >&2
 	exit 1
 fi
 
