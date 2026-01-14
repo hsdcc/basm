@@ -201,6 +201,47 @@ basm_assemble() {
 	movsd_mem_operands='^(xmm[0-9]+),[[:space:]]+\[(r[a-z]+)\]$'
 	cvtsd2si_operands='^(r[a-z]{2}),[[:space:]]+(xmm[0-9]+)$'
 
+	# Helper functions for parsing common operand patterns
+	parse_rr_operands() {
+		local operands="$1"
+		if [[ "$operands" =~ $rr_operands ]]; then
+			echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+			return 0
+		else
+			return 1
+		fi
+	}
+
+	parse_ri_operands() {
+		local operands="$1"
+		if [[ "$operands" =~ $ri_operands ]]; then
+			echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+			return 0
+		else
+			return 1
+		fi
+	}
+
+	parse_mem_operands() {
+		local operands="$1"
+		if [[ "$operands" =~ $mem_operands ]]; then
+			echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
+			return 0
+		else
+			return 1
+		fi
+	}
+
+	parse_unary_operands() {
+		local operands="$1"
+		if [[ "$operands" =~ $unary_operands ]]; then
+			echo "${BASH_REMATCH[1]}"
+			return 0
+		else
+			return 1
+		fi
+	}
+
 	# No longer loading instruction definitions from external file
 	# All instruction encodings are hardcoded directly in this file
 
@@ -504,9 +545,8 @@ basm_assemble() {
 
 assemble_mov() {
 	local operands="$1"
-	if [[ "$operands" =~ $rr_operands ]]; then
-		local dst="${BASH_REMATCH[1]}"
-		local src="${BASH_REMATCH[2]}"
+	if output=$(parse_rr_operands "$operands"); then
+		read dst src <<< "$output"
 		# mov reg, reg
 		local mod_rm=$(build_mod_rm 3 ${regs[$src]} ${regs[$dst]})
 		text_hex+=$(printf "4889%02x" $mod_rm)
@@ -518,18 +558,16 @@ assemble_mov() {
 		hex_code=$(assemble_mem_operand "$mem_op" "${regs[$reg]}" "4889")
 		text_hex+=$hex_code
 		current_address=$((current_address + ${#hex_code}/2))
-	elif [[ "$operands" =~ $mem_operands ]]; then
+	elif output=$(parse_mem_operands "$operands"); then
+		read reg mem <<< "$output"
 		# mov reg, [mem]
-		local reg="${BASH_REMATCH[1]}"
-		local mem_op="${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
-		hex_code=$(assemble_mem_operand "$mem_op" "${regs[$reg]}" "488b")
+		hex_code=$(assemble_mem_operand "$mem" "${regs[$reg]}" "488b")
 		text_hex+=$hex_code
 		current_address=$((current_address + ${#hex_code}/2))
 	else
 		# mov reg, imm
-		if [[ "$operands" =~ $ri_operands ]]; then
-			local reg="${BASH_REMATCH[1]}"
-			local arg="${BASH_REMATCH[2]}"
+		if output=$(parse_ri_operands "$operands"); then
+			read reg arg <<< "$output"
 			local val_is_immediate=0
 			local val
 			if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
@@ -583,16 +621,14 @@ assemble_mov() {
 assemble_arith() {
 	local mnemonic="$1"
 	local operands="$2"
-	if [[ "$operands" =~ $rr_operands ]]; then
-		local dst="${BASH_REMATCH[1]}"
-		local src="${BASH_REMATCH[2]}"
+	if output=$(parse_rr_operands "$operands"); then
+		read dst src <<< "$output"
 		local mod_rm=$(build_mod_rm 3 ${regs[$src]} ${regs[$dst]})
 		text_hex+=$(printf "${arith_opcodes[$mnemonic]}" $mod_rm)
 		current_address=$((current_address + 3))
-	elif [[ "$operands" =~ $mem_operands ]]; then
-		# op reg, [mem]
-		local reg="${BASH_REMATCH[1]}"
-		local mem_op="${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
+	elif output=$(parse_mem_operands "$operands"); then
+		read reg mem <<< "$output"
+		local mem_op="$mem"
 		local opcode_reg_mem
 		case "$mnemonic" in
 			add) opcode_reg_mem="4803" ;;
