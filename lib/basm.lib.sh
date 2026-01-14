@@ -158,6 +158,43 @@ basm_assemble() {
 	fp_opcodes["movsd_mem"]="f20f10"
 	fp_opcodes["cvtsd2si"]="f20f2d"
 
+	# Operand patterns for dispatch
+	rr_operands='^(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$'
+	ri_operands='^(r[a-z]{2}),[[:space:]]*(.*)$'
+	mem_operands='^\[(r[a-z]{2})([\+\-][0-9]+)?\]$'
+	mem_dest_operands='^\[(r[a-z]{2})([\+\-][0-9]+)?\],[[:space:]]+(r[a-z]{2})$'
+	imm_operands='^([0-9]+|-?[0-9]+|0x[0-9a-fA-F]+)$'
+	push_pop_operands='^(r[a-z]{2})$'
+	arith_rr_operands='^(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$'
+	arith_ri_operands='^(r[a-z]{2}),[[:space:]]*(.*)$'
+	jump_operands='^([.a-zA-Z0-9_]+)$'
+	loop_operands='^([.a-zA-Z0-9_]+)$'
+	unary_operands='^(r[a-z]{2})$'
+	call_operands='^([.a-zA-Z0-9_]+)$'
+	mul_operands='^(r[a-z]{2})$'
+	imul_operands='^(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$'
+	lea_operands='^(r[a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$'
+	shift_operands='^(r[a-z]{2}),[[:space:]]+([0-9]+)$'
+	test_rr_operands='^(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$'
+	test_ri_operands='^(r[a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$'
+	movzx_operands='^(r[a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$'
+	movsxd_operands='^(r[a-z]{2}),[[:space:]]+([er][a-z]{2})$'
+	setcc_operands='^([ab][lh]|[cd][lh]|r[a-z]{2})$'
+	cmov_operands='^(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$'
+	# fp operands
+	movss_rr_operands='^(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	movsd_rr_operands='^(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	addss_rr_operands='^(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	addsd_rr_operands='^(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	mulss_rr_operands='^(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	mulsd_rr_operands='^(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	subss_rr_operands='^(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	subsd_rr_operands='^(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	divss_rr_operands='^(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	divsd_rr_operands='^(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
+	movsd_mem_operands='^(xmm[0-9]+),[[:space:]]+\[(r[a-z]+)\]$'
+	cvtsd2si_operands='^(r[a-z]{2}),[[:space:]]+(xmm[0-9]+)$'
+
 	# No longer loading instruction definitions from external file
 	# All instruction encodings are hardcoded directly in this file
 
@@ -460,21 +497,183 @@ basm_assemble() {
 		append_instruction "$hex" 3
 	}
 
-	assemble_mov() {
-		local dst=$1 src=$2
-		if [[ "$dst" =~ ^r[a-z]{2}$ && "$src" =~ ^r[a-z]{2}$ ]]; then
-			# mov reg, reg
-			local modrm=$(build_modrm 3 ${regs[$src]} ${regs[$dst]})
-			local hex=$(printf "4889%02x" $modrm)
-			append_instruction "$hex" 3
+assemble_mov() {
+	local operands="$1"
+	if [[ "$operands" =~ $rr_operands ]]; then
+		local dst="${BASH_REMATCH[1]}"
+		local src="${BASH_REMATCH[2]}"
+		# mov reg, reg
+		local modrm=$(build_modrm 3 ${regs[$src]} ${regs[$dst]})
+		text_hex+=$(printf "4889%02x" $modrm)
+		current_address=$((current_address + 3))
+	elif [[ "$operands" =~ $mem_dest_operands ]]; then
+		# mov [mem], reg
+		local mem_op="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+		local reg="${BASH_REMATCH[3]}"
+		hex_code=$(assemble_mem_operand "$mem_op" "${regs[$reg]}" "4889")
+		text_hex+=$hex_code
+		current_address=$((current_address + ${#hex_code}/2))
+	elif [[ "$operands" =~ $mem_operands ]]; then
+		# mov reg, [mem]
+		local reg="${BASH_REMATCH[1]}"
+		local mem_op="${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
+		hex_code=$(assemble_mem_operand "$mem_op" "${regs[$reg]}" "488b")
+		text_hex+=$hex_code
+		current_address=$((current_address + ${#hex_code}/2))
+	else
+		# mov reg, imm
+		if [[ "$operands" =~ $ri_operands ]]; then
+			local reg="${BASH_REMATCH[1]}"
+			local arg="${BASH_REMATCH[2]}"
+			local val_is_immediate=0
+			local val
+			if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+				val=$((16#${BASH_REMATCH[1]}))
+				val_is_immediate=1
+			elif [[ "$arg" =~ ^-?[0-9]+$ ]]; then
+				if [[ "$arg" =~ ^-?(0|[1-9][0-9]*)$ ]]; then
+					val=$((arg))
+					val_is_immediate=1
+				else
+					echo "error: invalid integer format '$arg'" >&2
+					return 1
+				fi
+			elif [[ -n "${equs[$arg]:-}" ]]; then
+				val=${equs[$arg]}
+				if [[ ! "$val" =~ ^-?[0-9]+$ ]]; then
+					echo "error: equ '$arg' resolves to non-numeric value" >&2
+					return 1
+				fi
+				val_is_immediate=1
+			else
+				val_is_immediate=0
+			fi
+			if [[ "$val_is_immediate" -eq 1 ]]; then
+				if (( val >= -2147483648 && val <= 2147483647 )); then
+					local opcode=$((0xc0 + regs[$reg]))
+					text_hex+=$(printf "48c7%02x" "$opcode")$(u32le $val)
+					current_address=$((current_address + 7))
+				else
+					local op=$((0xb8 + regs[$reg]))
+					text_hex+=$(printf "48%02x" "$op")$(u64le $val)
+					current_address=$((current_address + 10))
+				fi
+			else
+				local op=$((0xb8 + regs[$reg]))
+				if [[ -n "${data_label_off[$arg]:-}" ]]; then
+					addr=$((data_vaddr + data_label_off[$arg]))
+				elif [[ -n "${labels[$arg]:-}" ]]; then
+					addr=$((text_vaddr + labels[$arg]))
+				else
+					echo "error: unknown label '$arg' in mov instruction" >&2
+					return 1
+				fi
+				text_hex+=$(printf "48%02x" "$op")$(u64le $addr)
+				current_address=$((current_address + 10))
+			fi
 		else
-			# other forms - keep complex for now, but simplified
-			echo "complex mov not implemented" >&2
+			echo "invalid mov operands: $operands" >&2
 			return 1
 		fi
-	}
+	fi
+}
 
-	assemble_mem_operand() {
+assemble_arith() {
+	local mnemonic="$1"
+	local operands="$2"
+	if [[ "$operands" =~ $rr_operands ]]; then
+		local dst="${BASH_REMATCH[1]}"
+		local src="${BASH_REMATCH[2]}"
+		local modrm=$(build_modrm 3 ${regs[$src]} ${regs[$dst]})
+		text_hex+=$(printf "${arith_opcodes[$mnemonic]}" $modrm)
+		current_address=$((current_address + 3))
+	elif [[ "$operands" =~ $mem_operands ]]; then
+		# op reg, [mem]
+		local reg="${BASH_REMATCH[1]}"
+		local mem_op="${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
+		local opcode_reg_mem
+		case "$mnemonic" in
+			add) opcode_reg_mem="4803" ;;
+			sub) opcode_reg_mem="482b" ;;
+			and) opcode_reg_mem="4823" ;;
+			or)  opcode_reg_mem="480b" ;;
+			cmp) opcode_reg_mem="483b" ;;
+		esac
+		hex_code=$(assemble_mem_operand "$mem_op" "${regs[$reg]}" "$opcode_reg_mem")
+		text_hex+=$hex_code
+		current_address=$((current_address + ${#hex_code}/2))
+	elif [[ "$operands" =~ $mem_dest_operands ]]; then
+		# op [mem], reg
+		local mem_op="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+		local reg="${BASH_REMATCH[3]}"
+		local opcode_mem_reg
+		case "$mnemonic" in
+			add) opcode_mem_reg="4801" ;;
+			sub) opcode_mem_reg="4829" ;;
+			and) opcode_mem_reg="4821" ;;
+			or)  opcode_mem_reg="4809" ;;
+			cmp) opcode_mem_reg="4839" ;;
+		esac
+		hex_code=$(assemble_mem_operand "$mem_op" "${regs[$reg]}" "$opcode_mem_reg")
+		text_hex+=$hex_code
+		current_address=$((current_address + ${#hex_code}/2))
+	else
+		# op reg, imm
+		if [[ "$operands" =~ $ri_operands ]]; then
+			local reg="${BASH_REMATCH[1]}"
+			local arg="${BASH_REMATCH[2]}"
+			if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+				val=$((16#${BASH_REMATCH[1]}))
+			elif [[ "$arg" =~ ^[0-9]+$ ]]; then
+				val=$((arg))
+			else
+				echo "error: unknown immediate value '$arg' in '$mnemonic'" >&2
+				return 1
+			fi
+			if [[ "$reg" == "rax" ]]; then
+				case "$mnemonic" in
+					add)
+						text_hex+="4881c0$(u32le $val)"
+						current_address=$((current_address + 7))
+						;;
+					sub)
+						text_hex+="4881e8$(u32le $val)"
+						current_address=$((current_address + 7))
+						;;
+					or)
+						text_hex+="4881c8$(u32le $val)"
+						current_address=$((current_address + 7))
+						;;
+					and)
+						text_hex+="4881e0$(u32le $val)"
+						current_address=$((current_address + 7))
+						;;
+					cmp)
+						text_hex+="483d$(u32le $val)"
+						current_address=$((current_address + 6))
+						;;
+				esac
+			else
+				local op_ext=0
+				case "$mnemonic" in
+					add) op_ext=0 ;;
+					sub) op_ext=5 ;;
+					cmp) op_ext=7 ;;
+					or) op_ext=1 ;;
+					and) op_ext=4 ;;
+				esac
+				local modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
+				text_hex+=$(printf "4883%02x%02x" "$modrm" "$val")
+				current_address=$((current_address + 4))
+			fi
+		else
+			echo "invalid $mnemonic operands: $operands" >&2
+			return 1
+		fi
+	fi
+}
+
+assemble_mem_operand() {
 		local mem_op="$1"
 		local reg_field="$2"
 		local opcode="$3"
