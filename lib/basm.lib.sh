@@ -405,6 +405,76 @@ basm_assemble() {
 		fi
 	}
 
+	assemble_arith_mem() {
+	    local op="$1"
+	    local dst="$2"
+	    local src="$3"
+
+	    local opcode_reg_mem # e.g. add reg, [mem]
+	    local opcode_mem_reg # e.g. add [mem], reg
+
+	    case "$op" in
+	        add) opcode_reg_mem="4803"; opcode_mem_reg="4801" ;;
+	        sub) opcode_reg_mem="482b"; opcode_mem_reg="4829" ;;
+	        and) opcode_reg_mem="4823"; opcode_mem_reg="4821" ;;
+	        or)  opcode_reg_mem="480b"; opcode_mem_reg="4809" ;;
+	        cmp) opcode_reg_mem="483b"; opcode_mem_reg="4839" ;;
+	        *) echo "unsupported arith op" >&2; return 1 ;;
+	    esac
+
+	    if [[ "$dst" =~ ^\[.*\]$ ]]; then # op [mem], reg
+	        hex_code=$(assemble_mem_operand "$dst" "${regs[$src]}" "$opcode_mem_reg")
+	        text_hex+=$hex_code
+	        current_address=$((current_address + ${#hex_code}/2))
+	    elif [[ "$src" =~ ^\[.*\]$ ]]; then # op reg, [mem]
+	        hex_code=$(assemble_mem_operand "$src" "${regs[$dst]}" "$opcode_reg_mem")
+	        text_hex+=$hex_code
+	        current_address=$((current_address + ${#hex_code}/2))
+	    fi
+	}
+
+	assemble_short_jump() {
+	    local op="$1"
+	    local lbl="$2"
+	    local opcode
+
+	    case "$op" in
+	        je) opcode="74" ;;
+	        jne) opcode="75" ;;
+	        jg) opcode="7f" ;;
+	        jl) opcode="7c" ;;
+	        jge) opcode="7d" ;;
+	        jle) opcode="7e" ;;
+	        ja) opcode="77" ;;
+	        jb) opcode="72" ;;
+	        jae) opcode="73" ;;
+	        jbe) opcode="76" ;;
+	        jo) opcode="70" ;;
+	        jno) opcode="71" ;;
+	        js) opcode="78" ;;
+	        jns) opcode="79" ;;
+	        jmp) opcode="eb" ;;
+	        loop) opcode="e2" ;;
+	        loope) opcode="e1" ;;
+	        loopne) opcode="e0" ;;
+	        *) echo "unsupported jump/loop op" >&2; return 1;;
+	    esac
+
+	    if [[ -z "${labels[$lbl]:-}" ]]; then
+	        echo "unknown label $lbl" >&2
+	        return 1
+	    fi
+	    local target_address=${labels[$lbl]}
+	    local offset=$((target_address - (current_address + 2)))
+	    if [ "$offset" -lt -128 ] || [ "$offset" -gt 127 ]; then
+	        echo "short jump out of range: $offset" >&2
+	        return 1
+	    fi
+	    local offset_hex=$(printf "%02x" $((offset & 0xff)))
+	    text_hex+="$opcode$offset_hex"
+	    current_address=$((current_address + 2))
+	}
+
 	data_bytes=""
 	text_ins=()
 	text_bytes_len=0
@@ -915,123 +985,86 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 			op=$((0x58 + regs[$reg]))
 			text_hex+=$(printf "%02x" $op)
 			current_address=$((current_address + 1))
-		elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
-			op="${BASH_REMATCH[1]}"
-			reg1="${BASH_REMATCH[2]}"
-			reg2="${BASH_REMATCH[3]}"
-			modrm=$((0xc0 | (regs[$reg2] << 3) | regs[$reg1]))
-			case "$op" in
-			add) text_hex+=$(printf "4801%02x" $modrm) ;;
-			sub) text_hex+=$(printf "4829%02x" $modrm) ;;
-			and) text_hex+=$(printf "4821%02x" $modrm) ;;
-			or) text_hex+=$(printf "4809%02x" $modrm) ;;
-			cmp) text_hex+=$(printf "4839%02x" $modrm) ;;
-			esac
-			current_address=$((current_address + 3))
-				elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]*(.*)$ ]]; then
-			op="${BASH_REMATCH[1]}"
-			reg="${BASH_REMATCH[2]}"
-			arg="${BASH_REMATCH[3]}"
+		elif [[ "$line" =~ ^(add|sub|cmp|or|and) ]]; then
+			local op="${BASH_REMATCH[1]}"
+			local operands="${line#$op }"
+			local dst="${operands%%,*}"
+			local src="${operands#*,}"
+			dst=$(trim_string "$dst")
+			src=$(trim_string "$src")
 
-			if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
-				val=$((16#${BASH_REMATCH[1]}))
-			elif [[ "$arg" =~ ^[0-9]+$ ]]; then
-				val=$((arg))
+			if [[ "$dst" =~ ^r[a-z]{2}$ && "$src" =~ ^r[a-z]{2}$ ]]; then
+				# op reg, reg
+				local reg1="$dst"
+				local reg2="$src"
+				local modrm=$((0xc0 | (regs[$reg2] << 3) | regs[$reg1]))
+				case "$op" in
+				add) text_hex+=$(printf "4801%02x" $modrm) ;;
+				sub) text_hex+=$(printf "4829%02x" $modrm) ;;
+				and) text_hex+=$(printf "4821%02x" $modrm) ;;
+				or) text_hex+=$(printf "4809%02x" $modrm) ;;
+				cmp) text_hex+=$(printf "4839%02x" $modrm) ;;
+				esac
+				current_address=$((current_address + 3))
+			elif [[ "$dst" =~ ^\[.*\]$ || "$src" =~ ^\[.*\]$ ]]; then
+				# op with memory
+				assemble_arith_mem "$op" "$dst" "$src"
 			else
-				echo "error: unknown immediate value '$arg' in '$line'" >&2
-				return 1
-			fi
+				# op reg, imm
+				local reg="$dst"
+				local arg="$src"
 
-			if [[ "$reg" == "rax" ]]; then
-				case "$op" in
-				add)
-					text_hex+="4881c0$(u32le $val)"
-					current_address=$((current_address + 7))
-					;;
-				sub)
-					text_hex+="4881e8$(u32le $val)"
-					current_address=$((current_address + 7))
-					;;
-				or)
-					text_hex+="4881c8$(u32le $val)"
-					current_address=$((current_address + 7))
-					;;
-				and)
-					text_hex+="4881e0$(u32le $val)"
-					current_address=$((current_address + 7))
-					;;
-				cmp)
-					text_hex+="483d$(u32le $val)"
-					current_address=$((current_address + 6))
-					;;
-				esac
-			else
-				op_ext=0
-				case "$op" in
-				add) op_ext=0 ;;
-				sub) op_ext=5 ;;
-				cmp) op_ext=7 ;;
-				or) op_ext=1 ;;
-				and) op_ext=4 ;;
-				esac
-				modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-				text_hex+=$(printf "4883%02x%02x" "$modrm" "$val")
-				current_address=$((current_address + 4))
+				if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+					val=$((16#${BASH_REMATCH[1]}))
+				elif [[ "$arg" =~ ^[0-9]+$ ]]; then
+					val=$((arg))
+				else
+					echo "error: unknown immediate value '$arg' in '$line'" >&2
+					return 1
+				fi
+
+				if [[ "$reg" == "rax" ]]; then
+					case "$op" in
+					add)
+						text_hex+="4881c0$(u32le $val)"
+						current_address=$((current_address + 7))
+						;;
+					sub)
+						text_hex+="4881e8$(u32le $val)"
+						current_address=$((current_address + 7))
+						;;
+					or)
+						text_hex+="4881c8$(u32le $val)"
+						current_address=$((current_address + 7))
+						;;
+					and)
+						text_hex+="4881e0$(u32le $val)"
+						current_address=$((current_address + 7))
+						;;
+					cmp)
+						text_hex+="483d$(u32le $val)"
+						current_address=$((current_address + 6))
+						;;
+					esac
+				else
+					op_ext=0
+					case "$op" in
+					add) op_ext=0 ;;
+					sub) op_ext=5 ;;
+					cmp) op_ext=7 ;;
+					or) op_ext=1 ;;
+					and) op_ext=4 ;;
+					esac
+					modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
+					text_hex+=$(printf "4883%02x%02x" "$modrm" "$val")
+					current_address=$((current_address + 4))
+				fi
 			fi
-		elif [[ "$line" =~ ^(je|jne|jg|jl|jge|jle|ja|jb|jae|jbe|jo|jno|js|jns|jmp)[[:space:]]+(.*)$ ]]; then
-			op="${BASH_REMATCH[1]}"
-			lbl="${BASH_REMATCH[2]}"
-			if [[ -z "${labels[$lbl]:-}" ]]; then
-				echo "unknown label $lbl" >&2
-				return 1
-			fi
-			target_address=${labels[$lbl]}
-			offset=$((target_address - (current_address + 2)))
-			if [ "$offset" -lt -128 ] || [ "$offset" -gt 127 ]; then
-				echo "short jump out of range: $offset" >&2
-				return 1
-			fi
-			offset_hex=$(printf "%02x" $((offset & 0xff)))
-			case "$op" in
-			je) text_hex+="74$offset_hex" ;;
-			jne) text_hex+="75$offset_hex" ;;
-			jg) text_hex+="7f$offset_hex" ;;
-			jl) text_hex+="7c$offset_hex" ;;
-			jge) text_hex+="7d$offset_hex" ;;
-			jle) text_hex+="7e$offset_hex" ;;
-			ja) text_hex+="77$offset_hex" ;;
-			jb) text_hex+="72$offset_hex" ;;
-			jae) text_hex+="73$offset_hex" ;;
-			jbe) text_hex+="76$offset_hex" ;;
-			jo) text_hex+="70$offset_hex" ;;
-			jno) text_hex+="71$offset_hex" ;;
-			js) text_hex+="78$offset_hex" ;;
-			jns) text_hex+="79$offset_hex" ;;
-			jmp) text_hex+="eb$offset_hex" ;;
-			esac
-			current_address=$((current_address + 2))
-		elif [[ "$line" =~ ^(loop|loope|loopne)[[:space:]]+(.*)$ ]]; then
-			op="${BASH_REMATCH[1]}"
-			lbl="${BASH_REMATCH[2]}"
-			if [[ -z "${labels[$lbl]:-}" ]]; then
-				echo "unknown label $lbl" >&2
-				return 1
-			fi
-			target_address=${labels[$lbl]}
-			offset=$((target_address - (current_address + 2)))
-			if [ "$offset" -lt -128 ] || [ "$offset" -gt 127 ]; then
-				echo "short jump out of range: $offset" >&2
-				return 1
-			fi
-			offset_hex=$(printf "%02x" $((offset & 0xff)))
-			case "$op" in
-			loop) text_hex+="e2$offset_hex" ;;
-			loope) text_hex+="e1$offset_hex" ;;
-			loopne) text_hex+="e0$offset_hex" ;;
-			esac
-			current_address=$((current_address + 2))
-elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
-	op="${BASH_REMATCH[1]}"
+				elif [[ "$line" =~ ^(je|jne|jg|jl|jge|jle|ja|jb|jae|jbe|jo|jno|js|jns|jmp|loop|loope|loopne)[[:space:]]+(.*)$ ]]; then
+					local op="${BASH_REMATCH[1]}"
+					local lbl="${BASH_REMATCH[2]}"
+					assemble_short_jump "$op" "$lbl"
+				elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then	op="${BASH_REMATCH[1]}"
 	reg="${BASH_REMATCH[2]}"
 	op_ext=0
 	if [[ "$op" == "inc" ]]; then
