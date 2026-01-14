@@ -357,6 +357,54 @@ basm_assemble() {
 		fi
 	}
 
+	assemble_mem_operand() {
+		local mem_op="$1"
+		local reg_field="$2"
+		local opcode="$3"
+
+		# very basic parsing for now
+		if [[ "$mem_op" =~ \[([a-z0-9]+)(([+-])([0-9]+))?\] ]]; then
+			local base_reg="${BASH_REMATCH[1]}"
+			local sign="${BASH_REMATCH[3]:+}"
+			local disp_val="${BASH_REMATCH[4]:-0}"
+			local disp=$((sign$disp_val))
+
+			local mod
+			local rm
+			local sib=""
+			local disp_hex=""
+
+			# determine mod
+			if (( disp == 0 )); then
+				mod=0
+				if [[ "$base_reg" == "rbp" || "$base_reg" == "r13" ]]; then
+					mod=1
+					disp_hex="00"
+				fi
+			elif (( disp >= -128 && disp <= 127 )); then
+				mod=1
+				disp_hex=$(printf "%02x" $((disp & 0xff)))
+			else
+				mod=2
+				disp_hex=$(u32le "$disp")
+			fi
+
+			rm=${regs[$base_reg]}
+
+			if [[ "$base_reg" == "rsp" || "$base_reg" == "r12" ]]; then
+				rm=4 # indicates SIB byte follows
+				sib="24" # SIB for [rsp/r12]
+			fi
+
+			local modrm
+			modrm=$(build_modrm "$mod" "$reg_field" "$rm")
+			printf "%s%02x%s%s" "$opcode" "$modrm" "$sib" "$disp_hex"
+		else
+			echo "error: unsupported memory operand in mov: $mem_op" >&2
+			return 1
+		fi
+	}
+
 	data_bytes=""
 	text_ins=()
 	text_bytes_len=0
@@ -642,12 +690,171 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 	text_hex=""
 	current_address=0
 	for line in "${text_ins[@]}"; do
-		if [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
+		if [[ "$line" =~ $movss_rr_pattern ]]; then
 			dst="${BASH_REMATCH[1]}"
 			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + regs[$src] * 8 + regs[$dst]))
-			text_hex+=$(printf "4889%02x" "$modrm")
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f30f10$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $movsd_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f20f10$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $addss_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f30f58$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $addsd_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f20f58$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $mulss_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f30f59$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $mulsd_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f20f59$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $subss_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f30f5c$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $subsd_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f20f5c$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $divss_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f30f5e$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $divsd_rr_pattern ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+			text_hex+="f20f5e$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $movsd_mem_pattern ]]; then
+			reg="${BASH_REMATCH[1]}"
+			reg2="${BASH_REMATCH[2]}"
+			modrm=$((xmm_regs[$reg] << 3 | regs[$reg2]))
+			text_hex+="f20f10$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ $cvtsd2si_pattern ]]; then
+			reg="${BASH_REMATCH[1]}"
+			xmm="${BASH_REMATCH[2]}"
+			modrm=$((0xc0 | regs[$reg] << 3 | xmm_regs[$xmm]))
+			text_hex+="f20f2d$(printf "%02x" $modrm)"
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+(r[a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
+			op="${BASH_REMATCH[1]}"
+			dst="${BASH_REMATCH[2]}"
+			src="${BASH_REMATCH[3]}"
+			dst_reg=$(get_reg_num "$dst")
+			src_reg=$(get_reg_num "$src")
+			modrm=$((0xc0 | (dst_reg << 3) | src_reg))
+			if [[ "$op" == "movzx" ]]; then
+				text_hex+=$(printf "480fb6%02x" $modrm)
+			else
+				text_hex+=$(printf "480fbe%02x" $modrm)
+			fi
+			current_address=$((current_address + 4))
+		elif [[ "$line" =~ ^movsxd[[:space:]]+(r[a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
+			dst="${BASH_REMATCH[1]}"
+			src="${BASH_REMATCH[2]}"
+			dst_reg=$(get_reg_num "$dst")
+			src_reg=$(get_reg_num "$src")
+			modrm=$((0xc0 | (dst_reg << 3) | src_reg))
+			text_hex+=$(printf "4863%02x" $modrm)
 			current_address=$((current_address + 3))
+		elif [[ "$line" =~ ^mov ]]; then
+			local mov_operands="${line#mov }"
+			local dst="${mov_operands%%,*}"
+			local src="${mov_operands#*,}"
+			dst=$(trim_string "$dst")
+			src=$(trim_string "$src")
+
+			if [[ "$dst" =~ ^r[a-z]{2}$ && "$src" =~ ^r[a-z]{2}$ ]]; then
+				# mov reg, reg
+				modrm=$((0xc0 + regs[$src] * 8 + regs[$dst]))
+				text_hex+=$(printf "4889%02x" "$modrm")
+				current_address=$((current_address + 3))
+			elif [[ "$dst" =~ ^\[.*\]$ ]]; then # mov [mem], reg
+				hex_code=$(assemble_mem_operand "$dst" "${regs[$src]}" "4889")
+				text_hex+=$hex_code
+				current_address=$((current_address + ${#hex_code}/2))
+			elif [[ "$src" =~ ^\[.*\]$ ]]; then # mov reg, [mem]
+				hex_code=$(assemble_mem_operand "$src" "${regs[$dst]}" "488b")
+				text_hex+=$hex_code
+				current_address=$((current_address + ${#hex_code}/2))
+			else
+				# mov reg, imm
+				local reg="$dst"
+				local arg="$src"
+				local val_is_immediate=0
+				local val
+				if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+					val=$((16#${BASH_REMATCH[1]}))
+					val_is_immediate=1
+				elif [[ "$arg" =~ ^-?[0-9]+$ ]]; then
+					if [[ "$arg" =~ ^-?(0|[1-9][0-9]*)$ ]]; then
+						val=$((arg))
+						val_is_immediate=1
+					else
+						echo "error: invalid integer format '$arg'" >&2
+						return 1
+					fi
+				elif [[ -n "${equs[$arg]:-}" ]]; then
+					val=${equs[$arg]}
+					if [[ ! "$val" =~ ^-?[0-9]+$ ]]; then
+						echo "error: equ '$arg' resolves to non-numeric value" >&2
+						return 1
+					fi
+					val_is_immediate=1
+				else
+					val_is_immediate=0
+				fi
+
+				if [[ "$val_is_immediate" -eq 1 ]]; then
+					if (( val >= -2147483648 && val <= 2147483647 )); then
+						opcode=$((0xc0 + regs[$reg]))
+						text_hex+=$(printf "48c7%02x" "$opcode")$(u32le $val)
+						current_address=$((current_address + 7))
+					else
+						op=$((0xb8 + regs[$reg]))
+						text_hex+=$(printf "48%02x" "$op")$(u64le $val)
+						current_address=$((current_address + 10))
+					fi
+				else
+					op=$((0xb8 + regs[$reg]))
+					if [[ -n "${data_label_off[$arg]:-}" ]]; then
+						addr=$((data_vaddr + data_label_off[$arg]))
+					elif [[ -n "${labels[$arg]:-}" ]]; then
+						addr=$((text_vaddr + labels[$arg]))
+					else
+						echo "error at line $line_number: unknown label '$arg' in mov instruction '$line'" >&2
+						return 1
+					fi
+					text_hex+=$(printf "48%02x" "$op")$(u64le $addr)
+					current_address=$((current_address + 10))
+				fi
+			fi
 		elif [[ "$line" =~ $cmov_pattern ]]; then
 			cond="${BASH_REMATCH[1]}"
 			dst="${BASH_REMATCH[2]}"
@@ -675,155 +882,6 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 			text_hex+="48"
 			text_hex+=$(printf "0f%02x%02x" "$cc" "$modrm")
 			current_address=$((current_address + 4))
-		 elif [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+\[(r[a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
-			 dst="${BASH_REMATCH[1]}"
-			 base="${BASH_REMATCH[2]}"
-			 disp="${BASH_REMATCH[3]:-}"
-			 # calculate modrm based on displacement presence and size
-			 mod=0
-			 need_sib=0
-			 if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
-				 need_sib=1
-			 fi
-			if [[ -z "$disp" ]]; then
-				if [[ "$base" == "rbp" || "$base" == "r13" ]]; then
-					mod=1
-					disp="0"
-				fi
-			else
-				if [[ "$disp" =~ ^[\+\-]?[0-9]+$ ]]; then
-					val=$disp
-					if (( val >= -128 && val <= 127 )); then
-						mod=1
-					else
-						mod=2
-					fi
-				fi
-			fi
-			if [[ $need_sib -eq 1 ]]; then
-				rm=4
-			else
-				rm=${regs[$base]}
-			fi
-			modrm=$((mod * 64 + ${regs[$dst]} * 8 + rm))
-			text_hex+="488b"
-			text_hex+=$(printf "%02x" "$modrm")
-			if [[ $need_sib -eq 1 ]]; then
-				sib=$((0 * 64 + 4 * 8 + ${regs[$base]}))
-				text_hex+=$(printf "%02x" $sib)
-			fi
-			if [[ -n "$disp" && "$disp" != "0" ]]; then
-				if [[ $mod -eq 1 ]]; then
-					text_hex+=$(printf "%02x" $((disp & 0xff)))
-				else
-					text_hex+=$(u32le "$disp")
-				fi
-			fi
-			if [[ $mod -eq 0 && ($base == "rbp" || $base == "r13") ]]; then
-				text_hex+="00"
-			fi
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ ^mov[[:space:]]+\[(r[a-z]{2})([\+\-][0-9]+)?\],[[:space:]]+(r[a-z]{2})$ ]]; then
-			base="${BASH_REMATCH[1]}"
-			disp="${BASH_REMATCH[2]:-}"
-			dst="${BASH_REMATCH[3]}"
-			mod=0
-			need_sib=0
-			if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
-				need_sib=1
-			fi
-			if [[ -z "$disp" ]]; then
-				if [[ "$base" == "rbp" || "$base" == "r13" ]]; then
-					mod=1
-					disp="0"
-				fi
-			else
-				if [[ "$disp" =~ ^[\+\-]?[0-9]+$ ]]; then
-					val=$disp
-					if (( val >= -128 && val <= 127 )); then
-						mod=1
-					else
-						mod=2
-					fi
-				fi
-			fi
-			if [[ $need_sib -eq 1 ]]; then
-				rm=4
-			else
-				rm=${regs[$base]}
-			fi
-			modrm=$((mod * 64 + regs[$dst] * 8 + rm))
-			text_hex+="4889"
-			text_hex+=$(printf "%02x" "$modrm")
-			if [[ $need_sib -eq 1 ]]; then
-				sib=$((0 * 64 + 4 * 8 + ${regs[$base]}))
-				text_hex+=$(printf "%02x" $sib)
-			fi
-			if [[ -n "$disp" && "$disp" != "0" ]]; then
-				if [[ $mod -eq 1 ]]; then
-					text_hex+=$(printf "%02x" $((disp & 0xff)))
-				else
-					text_hex+=$(u32le "$disp")
-				fi
-			fi
-			if [[ $mod -eq 0 && ($base == "rbp" || $base == "r13") ]]; then
-				text_hex+="00"
-			fi
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(.*)$ ]]; then
-			reg="${BASH_REMATCH[1]}"
-			arg="${BASH_REMATCH[2]}"
-			local val_is_immediate=0
-			local val
-			if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
-				val=$((16#${BASH_REMATCH[1]}))
-				# Basic validation without output (just to ensure the value fits in bash integer type reasonably)
-				val_is_immediate=1
-			elif [[ "$arg" =~ ^-?[0-9]+$ ]]; then
-				# Basic validation of integer format
-				if [[ "$arg" =~ ^-?(0|[1-9][0-9]*)$ ]]; then
-					val=$((arg))
-					val_is_immediate=1
-				else
-					echo "error: invalid integer format '$arg'" >&2
-					return 1
-				fi
-			elif [[ -n "${equs[$arg]:-}" ]]; then
-				val=${equs[$arg]}
-				# Check if val is actually numeric
-				if [[ ! "$val" =~ ^-?[0-9]+$ ]]; then
-					echo "error: equ '$arg' resolves to non-numeric value" >&2
-					return 1
-				fi
-				val_is_immediate=1
-			else
-				# arg is a label, not an immediate
-				val_is_immediate=0
-			fi
-
-			if [[ "$val_is_immediate" -eq 1 ]]; then
-				if (( val >= -2147483648 && val <= 2147483647 )); then
-					opcode=$((0xc0 + regs[$reg]))
-					text_hex+=$(printf "48c7%02x" "$opcode")$(u32le $val)
-					current_address=$((current_address + 7))
-				else
-					op=$((0xb8 + regs[$reg]))
-					text_hex+=$(printf "48%02x" "$op")$(u64le $val)
-					current_address=$((current_address + 10))
-				fi
-			else
-				op=$((0xb8 + regs[$reg]))
-				if [[ -n "${data_label_off[$arg]:-}" ]]; then
-					addr=$((data_vaddr + data_label_off[$arg]))
-				elif [[ -n "${labels[$arg]:-}" ]]; then
-					addr=$((text_vaddr + labels[$arg]))
-				else
-					echo "error at line $line_number: unknown label '$arg' in mov instruction '$line'" >&2
-					return 1
-				fi
-				text_hex+=$(printf "48%02x" "$op")$(u64le $addr)
-				current_address=$((current_address + 10))
-			fi
 		elif [[ "$line" == "syscall" ]]; then
 			text_hex+="0f05"
 			current_address=$((current_address + 2))
@@ -1064,31 +1122,9 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 				val=$((arg))
 			fi
 			modrm=$((0xc0 | regs[$reg]))
-			text_hex+=$(printf "48f7%02x" "$modrm")$(u32le "$val")
-			current_address=$((current_address + 7))
-		elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+(r[a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
-			op="${BASH_REMATCH[1]}"
-			dst="${BASH_REMATCH[2]}"
-			src="${BASH_REMATCH[3]}"
-			dst_reg=$(get_reg_num "$dst")
-			src_reg=$(get_reg_num "$src")
-			modrm=$((0xc0 | (dst_reg << 3) | src_reg))
-			if [[ "$op" == "movzx" ]]; then
-				text_hex+=$(printf "480fb6%02x" $modrm)
-			else
-				text_hex+=$(printf "480fbe%02x" $modrm)
-			fi
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ ^movsxd[[:space:]]+(r[a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			dst_reg=$(get_reg_num "$dst")
-			src_reg=$(get_reg_num "$src")
-			modrm=$((0xc0 | (dst_reg << 3) | src_reg))
-			text_hex+=$(printf "4863%02x" $modrm)
-			current_address=$((current_address + 3))
-				elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
-			cond="${BASH_REMATCH[1]}"
+							text_hex+=$(printf "48f7%02x" "$modrm")$(u32le "$val")
+						current_address=$((current_address + 7))
+					elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then			cond="${BASH_REMATCH[1]}"
 			dst="${BASH_REMATCH[2]}"
 			dst_reg=$(get_reg_num "$dst")
 			modrm=$((0xc0 | dst_reg))
@@ -1110,78 +1146,6 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 			ns) text_hex+=$(printf "0f99%02x" $modrm) ;;
 			esac
 			current_address=$((current_address + 3))
-				elif [[ "$line" =~ $movss_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="f30f10$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ $movsd_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="f20f10$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ $addss_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="f30f58$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ $addsd_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="f20f58$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ $mulss_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="f30f59$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ $mulsd_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="f20f59$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ $subss_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="f30f5c$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ $subsd_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="f20f5c$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ $divss_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="f30f5e$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ $divsd_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="f20f5e$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ $movsd_mem_pattern ]]; then
-			reg="${BASH_REMATCH[1]}"
-			reg2="${BASH_REMATCH[2]}"
-			modrm=$((xmm_regs[$reg] << 3 | regs[$reg2]))
-			text_hex+="f20f10$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
-		elif [[ "$line" =~ $cvtsd2si_pattern ]]; then
-			reg="${BASH_REMATCH[1]}"
-			xmm="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 | regs[$reg] << 3 | xmm_regs[$xmm]))
-			text_hex+="f20f2d$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
 		else
 			echo "internal error assembling: $line" >&2
 			return 1
