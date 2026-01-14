@@ -300,68 +300,51 @@ basm_assemble() {
 		fi
 	}
 
+	# Calculate MOV memory operand size based on addressing mode
+	# Used by both first pass (sizing) and second pass (code generation)
+	calc_mem_addr_size() {
+		local base="$1"
+		local disp="$2"
+		
+		local size=4
+		if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+			if [[ -z "$disp" ]]; then
+				size=4
+			else
+				if (( disp >= -128 && disp <= 127 )); then
+					size=5
+				else
+					size=8
+				fi
+			fi
+		else
+			if [[ -z "$disp" ]]; then
+				size=3
+			elif [[ "$base" == "rbp" || "$base" == "r13" ]]; then
+				size=4
+			else
+				if (( disp >= -128 && disp <= 127 )); then
+					size=4
+				else
+					size=7
+				fi
+			fi
+		fi
+		echo $size
+	}
+
 	# Helper function to calculate MOV instruction size based on addressing mode
 	calculate_mov_size() {
 		arg="${BASH_REMATCH[2]}"
 		if [[ "$arg" =~ ^\[(r[a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
 			base="${BASH_REMATCH[1]}"
 			disp="${BASH_REMATCH[2]:-}"
-			size=4
-			if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
-				if [[ -z "$disp" ]]; then
-					size=4
-				else
-					val=$disp
-					if (( val >= -128 && val <= 127 )); then
-						size=5
-					else
-						size=8
-					fi
-				fi
-			else
-				if [[ -z "$disp" ]]; then
-					size=3
-				elif [[ "$base" == "rbp" || "$base" == "r13" ]]; then
-					size=4
-				else
-					val=$disp
-					if (( val >= -128 && val <= 127 )); then
-						size=4
-					else
-						size=7
-					fi
-				fi
-			fi
+			size=$(calc_mem_addr_size "$base" "$disp")
 			text_bytes_len=$((text_bytes_len + size))
 		elif [[ "$arg" =~ ^\[(r[a-z]{2})([\+\-][0-9]+)?\],[[:space:]]+(r[a-z]{2})$ ]]; then
 			base="${BASH_REMATCH[1]}"
 			disp="${BASH_REMATCH[2]:-}"
-			size=4
-			if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
-				if [[ -z "$disp" ]]; then
-					size=4
-				else
-					val=$disp
-					if (( val >= -128 && val <= 127 )); then
-						size=5
-					else
-						size=8
-					fi
-				fi
-			else
-				if [[ -z "$disp" ]]; then
-					size=3
-				elif [[ "$base" == "rbp" || "$base" == "r13" ]]; then
-					size=4
-				else
-					val=$disp
-					if (( val >= -128 && val <= 127 )); then
-						size=4
-					else
-						size=7
-					fi
-				fi
-			fi
+			size=$(calc_mem_addr_size "$base" "$disp")
 			text_bytes_len=$((text_bytes_len + size))
 		elif [[ "$arg" =~ ^[0-9]+$ ]] || [[ "$arg" =~ ^-?[0-9]+$ ]] || [[ "$arg" =~ ^0x[0-9a-fA-F]+$ ]] || [[ -n "${equs[$arg]:-}" ]]; then
 			if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
@@ -507,6 +490,12 @@ basm_assemble() {
 			local rm
 			local sib=""
 			local disp_hex=""
+
+			# Validate base register exists
+			if [[ -z "${regs[$base_reg]:-}" ]]; then
+				echo "error: invalid base register '$base_reg' in memory operand '$mem_op'" >&2
+				return 1
+			fi
 
 			# determine mod
 			if (( disp == 0 )); then
