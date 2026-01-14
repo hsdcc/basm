@@ -728,73 +728,73 @@ assemble_mem_operand() {
 	}
 
 	assemble_arith_mem() {
-	    local op="$1"
-	    local dst="$2"
-	    local src="$3"
+		local op="$1"
+		local dst="$2"
+		local src="$3"
 
-	    local opcode_reg_mem # e.g. add reg, [mem]
-	    local opcode_mem_reg # e.g. add [mem], reg
+		local opcode_reg_mem # e.g. add reg, [mem]
+		local opcode_mem_reg # e.g. add [mem], reg
 
-	    case "$op" in
-	        add) opcode_reg_mem="4803"; opcode_mem_reg="4801" ;;
-	        sub) opcode_reg_mem="482b"; opcode_mem_reg="4829" ;;
-	        and) opcode_reg_mem="4823"; opcode_mem_reg="4821" ;;
-	        or)  opcode_reg_mem="480b"; opcode_mem_reg="4809" ;;
-	        cmp) opcode_reg_mem="483b"; opcode_mem_reg="4839" ;;
-	        *) echo "unsupported arith op" >&2; return 1 ;;
-	    esac
+		case "$op" in
+			add) opcode_reg_mem="4803"; opcode_mem_reg="4801" ;;
+			sub) opcode_reg_mem="482b"; opcode_mem_reg="4829" ;;
+			and) opcode_reg_mem="4823"; opcode_mem_reg="4821" ;;
+			or)  opcode_reg_mem="480b"; opcode_mem_reg="4809" ;;
+			cmp) opcode_reg_mem="483b"; opcode_mem_reg="4839" ;;
+			*) echo "unsupported arith op" >&2; return 1 ;;
+		esac
 
-	    if [[ "$dst" =~ ^\[.*\]$ ]]; then # op [mem], reg
-	        hex_code=$(assemble_mem_operand "$dst" "${regs[$src]}" "$opcode_mem_reg")
-	        text_hex+=$hex_code
-	        current_address=$((current_address + ${#hex_code}/2))
-	    elif [[ "$src" =~ ^\[.*\]$ ]]; then # op reg, [mem]
-	        hex_code=$(assemble_mem_operand "$src" "${regs[$dst]}" "$opcode_reg_mem")
-	        text_hex+=$hex_code
-	        current_address=$((current_address + ${#hex_code}/2))
-	    fi
+		if [[ "$dst" =~ ^\[.*\]$ ]]; then # op [mem], reg
+			hex_code=$(assemble_mem_operand "$dst" "${regs[$src]}" "$opcode_mem_reg")
+			text_hex+=$hex_code
+			current_address=$((current_address + ${#hex_code}/2))
+		elif [[ "$src" =~ ^\[.*\]$ ]]; then # op reg, [mem]
+			hex_code=$(assemble_mem_operand "$src" "${regs[$dst]}" "$opcode_reg_mem")
+			text_hex+=$hex_code
+			current_address=$((current_address + ${#hex_code}/2))
+		fi
 	}
 
 	assemble_short_jump() {
-	    local op="$1"
-	    local lbl="$2"
-	    local opcode
+		local op="$1"
+		local lbl="$2"
+		local opcode
 
-	    case "$op" in
-	        je) opcode="74" ;;
-	        jne) opcode="75" ;;
-	        jg) opcode="7f" ;;
-	        jl) opcode="7c" ;;
-	        jge) opcode="7d" ;;
-	        jle) opcode="7e" ;;
-	        ja) opcode="77" ;;
-	        jb) opcode="72" ;;
-	        jae) opcode="73" ;;
-	        jbe) opcode="76" ;;
-	        jo) opcode="70" ;;
-	        jno) opcode="71" ;;
-	        js) opcode="78" ;;
-	        jns) opcode="79" ;;
-	        jmp) opcode="eb" ;;
-	        loop) opcode="e2" ;;
-	        loope) opcode="e1" ;;
-	        loopne) opcode="e0" ;;
-	        *) echo "unsupported jump/loop op" >&2; return 1;;
-	    esac
+		case "$op" in
+			je) opcode="74" ;;
+			jne) opcode="75" ;;
+			jg) opcode="7f" ;;
+			jl) opcode="7c" ;;
+			jge) opcode="7d" ;;
+			jle) opcode="7e" ;;
+			ja) opcode="77" ;;
+			jb) opcode="72" ;;
+			jae) opcode="73" ;;
+			jbe) opcode="76" ;;
+			jo) opcode="70" ;;
+			jno) opcode="71" ;;
+			js) opcode="78" ;;
+			jns) opcode="79" ;;
+			jmp) opcode="eb" ;;
+			loop) opcode="e2" ;;
+			loope) opcode="e1" ;;
+			loopne) opcode="e0" ;;
+			*) echo "unsupported jump/loop op" >&2; return 1;;
+		esac
 
-	    if [[ -z "${labels[$lbl]:-}" ]]; then
-	        echo "unknown label $lbl" >&2
-	        return 1
-	    fi
-	    local target_address=${labels[$lbl]}
-	    local offset=$((target_address - (current_address + 2)))
-	    if [ "$offset" -lt -128 ] || [ "$offset" -gt 127 ]; then
-	        echo "short jump out of range: $offset" >&2
-	        return 1
-	    fi
-	    local offset_hex=$(printf "%02x" $((offset & 0xff)))
-	    text_hex+="$opcode$offset_hex"
-	    current_address=$((current_address + 2))
+		if [[ -z "${labels[$lbl]:-}" ]]; then
+			echo "unknown label $lbl" >&2
+			return 1
+		fi
+		local target_address=${labels[$lbl]}
+		local offset=$((target_address - (current_address + 2)))
+		if [ "$offset" -lt -128 ] || [ "$offset" -gt 127 ]; then
+			echo "short jump out of range: $offset" >&2
+			return 1
+		fi
+		local offset_hex=$(printf "%02x" $((offset & 0xff)))
+		text_hex+="$opcode$offset_hex"
+		current_address=$((current_address + 2))
 	}
 
 	data_bytes=""
