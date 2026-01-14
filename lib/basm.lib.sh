@@ -854,6 +854,14 @@ basm_assemble() {
 			src="${BASH_REMATCH[3]}"
 			dst_reg=$(get_reg_num "$dst")
 			src_reg=$(get_reg_num "$src")
+			if (( dst_reg < 0 )); then
+				echo "error at line $line_number: invalid destination register '$dst' in '$line'" >&2
+				return 1
+			fi
+			if (( src_reg < 0 )); then
+				echo "error at line $line_number: invalid source register '$src' in '$line'" >&2
+				return 1
+			fi
 			modrm=$((0xc0 | (dst_reg << 3) | src_reg))
 			if [[ "$op" == "movzx" ]]; then
 				text_hex+=$(printf "480fb6%02x" $modrm)
@@ -866,6 +874,14 @@ basm_assemble() {
 			src="${BASH_REMATCH[2]}"
 			dst_reg=$(get_reg_num "$dst")
 			src_reg=$(get_reg_num "$src")
+			if (( dst_reg < 0 )); then
+				echo "error at line $line_number: invalid destination register '$dst' in '$line'" >&2
+				return 1
+			fi
+			if (( src_reg < 0 )); then
+				echo "error at line $line_number: invalid source register '$src' in '$line'" >&2
+				return 1
+			fi
 			modrm=$((0xc0 | (dst_reg << 3) | src_reg))
 			text_hex+=$(printf "4863%02x" $modrm)
 			current_address=$((current_address + 3))
@@ -1165,9 +1181,14 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 			modrm=$((0xc0 | regs[$reg]))
 							text_hex+=$(printf "48f7%02x" "$modrm")$(u32le "$val")
 						current_address=$((current_address + 7))
-					elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then			cond="${BASH_REMATCH[1]}"
+					elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
+			cond="${BASH_REMATCH[1]}"
 			dst="${BASH_REMATCH[2]}"
 			dst_reg=$(get_reg_num "$dst")
+			if (( dst_reg < 0 )); then
+				echo "error at line $line_number: invalid register '$dst' in '$line'" >&2
+				return 1
+			fi
 			modrm=$((0xc0 | dst_reg))
 			
 			case "$cond" in
