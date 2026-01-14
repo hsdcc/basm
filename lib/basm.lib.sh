@@ -181,6 +181,70 @@ basm_assemble() {
 	xmm_regs["xmm14"]=14
 	xmm_regs["xmm15"]=15
 
+	# opcode arrays for cleaner dispatch
+	declare -A arith_opcodes
+	arith_opcodes["add"]="4801%02x"
+	arith_opcodes["sub"]="4829%02x"
+	arith_opcodes["or"]="4809%02x"
+	arith_opcodes["and"]="4821%02x"
+	arith_opcodes["cmp"]="4839%02x"
+
+	declare -A jump_opcodes
+	jump_opcodes["je"]="74"
+	jump_opcodes["jne"]="75"
+	jump_opcodes["jg"]="7f"
+	jump_opcodes["jl"]="7c"
+	jump_opcodes["jge"]="7d"
+	jump_opcodes["jle"]="7e"
+	jump_opcodes["ja"]="77"
+	jump_opcodes["jb"]="72"
+	jump_opcodes["jae"]="73"
+	jump_opcodes["jbe"]="76"
+	jump_opcodes["jo"]="70"
+	jump_opcodes["jno"]="71"
+	jump_opcodes["js"]="78"
+	jump_opcodes["jns"]="79"
+	jump_opcodes["jmp"]="eb"
+
+	declare -A loop_opcodes
+	loop_opcodes["loop"]="e2"
+	loop_opcodes["loope"]="e1"
+	loop_opcodes["loopne"]="e0"
+
+	declare -A unary_op_ext
+	unary_op_ext["inc"]=0
+	unary_op_ext["dec"]=1
+	unary_op_ext["neg"]=3
+	unary_op_ext["not"]=2
+
+	declare -A shift_op_ext
+	shift_op_ext["shl"]=4
+	shift_op_ext["shr"]=5
+	shift_op_ext["sar"]=7
+
+	declare -A mul_op_ext
+	mul_op_ext["mul"]=4
+	mul_op_ext["div"]=6
+	mul_op_ext["idiv"]=7
+
+	declare -A cmov_codes
+	cmov_codes["e"]=0x44
+	cmov_codes["ne"]=0x45
+	cmov_codes["a"]=0x47
+	cmov_codes["ae"]=0x43
+	cmov_codes["b"]=0x42
+	cmov_codes["be"]=0x46
+	cmov_codes["g"]=0x4f
+	cmov_codes["ge"]=0x4d
+	cmov_codes["l"]=0x4c
+	cmov_codes["le"]=0x4e
+	cmov_codes["o"]=0x40
+	cmov_codes["no"]=0x41
+	cmov_codes["s"]=0x48
+	cmov_codes["ns"]=0x49
+	cmov_codes["p"]=0x4a
+	cmov_codes["np"]=0x4b
+
 	# helper to get register number for byte registers too
 	get_reg_num() {
 		local reg="$1"
@@ -199,6 +263,98 @@ basm_assemble() {
 			bh) echo 7 ;;
 			*) echo -1 ;;
 		esac
+	}
+
+	# helper functions for assembling
+	build_modrm() {
+		local mod=$1 reg=$2 rm=$3
+		echo $((mod * 64 + reg * 8 + rm))
+	}
+
+	parse_immediate() {
+		local arg=$1
+		if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+			echo $((16#${BASH_REMATCH[1]}))
+		elif [[ "$arg" =~ ^[0-9]+$ ]]; then
+			echo $((arg))
+		elif [[ -n "${equs[$arg]:-}" ]]; then
+			echo ${equs[$arg]}
+		else
+			echo "error: unknown immediate '$arg'" >&2
+			return 1
+		fi
+	}
+
+	append_instruction() {
+		local hex=$1 size=$2
+		text_hex+=$hex
+		((current_address += size))
+	}
+
+	parse_operands() {
+		local line=$1
+		# Simple split by space, assume max 3 operands
+		IFS=' ' read -r mnemonic op1 op2 op3 <<< "$line"
+		# Trim
+		mnemonic=$(trim_string "$mnemonic")
+		op1=$(trim_string "$op1")
+		op2=$(trim_string "$op2")
+		op3=$(trim_string "$op3")
+		echo "$mnemonic|$op1|$op2|$op3"
+	}
+
+	# assembler functions
+	assemble_simple() {
+		local op=$1
+		case "$op" in
+			syscall) append_instruction "0f05" 2 ;;
+			nop) append_instruction "90" 1 ;;
+			ret) append_instruction "c3" 1 ;;
+			leave) append_instruction "c9" 1 ;;
+			cqo) append_instruction "4899" 2 ;;
+			cdqe) append_instruction "4898" 2 ;;
+			*) echo "unknown simple op $op" >&2; return 1 ;;
+		esac
+	}
+
+	assemble_xor_self() {
+		local reg=$1
+		local modrm=$(build_modrm 3 ${regs[$reg]} ${regs[$reg]})
+		local hex=$(printf "4831%02x" $modrm)
+		append_instruction "$hex" 3
+	}
+
+	assemble_push_pop() {
+		local op=$1 reg=$2
+		local opcode
+		if [[ "$op" == "push" ]]; then
+			opcode=$((0x50 + regs[$reg]))
+		else
+			opcode=$((0x58 + regs[$reg]))
+		fi
+		local hex=$(printf "%02x" $opcode)
+		append_instruction "$hex" 1
+	}
+
+	assemble_arith_rr() {
+		local op=$1 dst=$2 src=$3
+		local modrm=$(build_modrm 3 ${regs[$src]} ${regs[$dst]})
+		local hex=$(printf "${arith_opcodes[$op]}" $modrm)
+		append_instruction "$hex" 3
+	}
+
+	assemble_mov() {
+		local dst=$1 src=$2
+		if [[ "$dst" =~ ^r[a-z]{2}$ && "$src" =~ ^r[a-z]{2}$ ]]; then
+			# mov reg, reg
+			local modrm=$(build_modrm 3 ${regs[$src]} ${regs[$dst]})
+			local hex=$(printf "4889%02x" $modrm)
+			append_instruction "$hex" 3
+		else
+			# other forms - keep complex for now, but simplified
+			echo "complex mov not implemented" >&2
+			return 1
+		fi
 	}
 
 	data_bytes=""
