@@ -37,16 +37,22 @@ generate_zeros() {
 	done
 }
 
+# Helper function for error messages
+error_msg() {
+	echo "error: $1" >&2
+	return 1
+}
+
 # Helper function to write data at specific offset in a file
 write_at_offset() {
 	local src_file="$1"		 # Source file containing data to write
 	local dest_file="$2"	 # Destination file to write to
 	local offset="$3"			 # Byte offset to write at write at
-	
+
 	# Read the source file content
 	local src_content
 	src_content=$(< "$src_file")
-	
+
 	# Read the destination file content
 	local dest_content
 	if [[ -f "$dest_file" ]]; then
@@ -54,7 +60,7 @@ write_at_offset() {
 	else
 		dest_content=""
 	fi
-	
+
 	# Ensure destination is at least 'offset' bytes long by padding with nulls if necessary
 	local current_len=${#dest_content}
 	local padded_content="$dest_content"
@@ -65,14 +71,14 @@ write_at_offset() {
 			padded_content+=$'\0'
 		done
 	fi
-	
+
 	# Calculate where to place the source content
 	local prefix="${padded_content:0:offset}"
 	local suffix="${padded_content:offset}"
-	
+
 	# Combine: prefix + src_content + suffix
 	local result="$prefix$src_content$suffix"
-	
+
 	# Write the combined content back to the destination file
 	printf '%s' "$result" > "$dest_file"
 }
@@ -203,7 +209,7 @@ basm_assemble() {
 	declare -A labels
 	declare -A data_label_off
 	declare -A equs
-	# register encoding map for modrm byte
+	# register encoding map for mod_rm byte
 	declare -A regs
 	regs["rax"]=0
 	regs["rcx"]=1
@@ -318,7 +324,7 @@ basm_assemble() {
 	}
 
 	# helper functions for assembling
-	build_modrm() {
+	build_mod_rm() {
 		local mod=$1 reg=$2 rm=$3
 		echo $((mod * 64 + reg * 8 + rm))
 	}
@@ -331,10 +337,9 @@ basm_assemble() {
 			echo $((arg))
 		elif [[ -n "${equs[$arg]:-}" ]]; then
 			echo ${equs[$arg]}
-		else
-			echo "error: unknown immediate '$arg'" >&2
-			return 1
-		fi
+	else
+		error_msg "unknown immediate '$arg'"
+	fi
 	}
 
 	# Calculate MOV memory operand size based on addressing mode
@@ -434,8 +439,8 @@ basm_assemble() {
 		local size="$2"
 		local dst="${BASH_REMATCH[1]}"
 		local src="${BASH_REMATCH[2]}"
-		local modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-		text_hex+="${fp_opcodes["$op_name"]}$(printf "%02x" $modrm)"
+		local mod_rm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+		text_hex+="${fp_opcodes["$op_name"]}$(printf "%02x" $mod_rm)"
 		current_address=$((current_address + size))
 	}
 
@@ -467,14 +472,14 @@ basm_assemble() {
 			leave) append_instruction "c9" 1 ;;
 			cqo) append_instruction "4899" 2 ;;
 			cdqe) append_instruction "4898" 2 ;;
-			*) echo "unknown simple op $op" >&2; return 1 ;;
+			*) error_msg "unknown simple op '$op'" ;;
 		esac
 	}
 
 	assemble_xor_self() {
 		local reg=$1
-		local modrm=$(build_modrm 3 ${regs[$reg]} ${regs[$reg]})
-		local hex=$(printf "4831%02x" $modrm)
+		local mod_rm=$(build_mod_rm 3 ${regs[$reg]} ${regs[$reg]})
+		local hex=$(printf "4831%02x" $mod_rm)
 		append_instruction "$hex" 3
 	}
 
@@ -492,8 +497,8 @@ basm_assemble() {
 
 	assemble_arith_rr() {
 		local op=$1 dst=$2 src=$3
-		local modrm=$(build_modrm 3 ${regs[$src]} ${regs[$dst]})
-		local hex=$(printf "${arith_opcodes[$op]}" $modrm)
+		local mod_rm=$(build_mod_rm 3 ${regs[$src]} ${regs[$dst]})
+		local hex=$(printf "${arith_opcodes[$op]}" $mod_rm)
 		append_instruction "$hex" 3
 	}
 
@@ -503,8 +508,8 @@ assemble_mov() {
 		local dst="${BASH_REMATCH[1]}"
 		local src="${BASH_REMATCH[2]}"
 		# mov reg, reg
-		local modrm=$(build_modrm 3 ${regs[$src]} ${regs[$dst]})
-		text_hex+=$(printf "4889%02x" $modrm)
+		local mod_rm=$(build_mod_rm 3 ${regs[$src]} ${regs[$dst]})
+		text_hex+=$(printf "4889%02x" $mod_rm)
 		current_address=$((current_address + 3))
 	elif [[ "$operands" =~ $mem_dest_operands ]]; then
 		# mov [mem], reg
@@ -541,8 +546,7 @@ assemble_mov() {
 			elif [[ -n "${equs[$arg]:-}" ]]; then
 				val=${equs[$arg]}
 				if [[ ! "$val" =~ ^-?[0-9]+$ ]]; then
-					echo "error: equ '$arg' resolves to non-numeric value" >&2
-					return 1
+					error_msg "equ '$arg' resolves to non-numeric value"
 				fi
 				val_is_immediate=1
 			else
@@ -564,16 +568,14 @@ assemble_mov() {
 					addr=$((data_vaddr + data_label_off[$arg]))
 				elif [[ -n "${labels[$arg]:-}" ]]; then
 					addr=$((text_vaddr + labels[$arg]))
-				else
-					echo "error: unknown label '$arg' in mov instruction" >&2
-					return 1
-				fi
+					else
+						error_msg "unknown label '$arg' in mov instruction"
+					fi
 				text_hex+=$(printf "48%02x" "$op")$(u64le $addr)
 				current_address=$((current_address + 10))
 			fi
 		else
-			echo "invalid mov operands: $operands" >&2
-			return 1
+			error_msg "invalid mov operands: $operands"
 		fi
 	fi
 }
@@ -584,8 +586,8 @@ assemble_arith() {
 	if [[ "$operands" =~ $rr_operands ]]; then
 		local dst="${BASH_REMATCH[1]}"
 		local src="${BASH_REMATCH[2]}"
-		local modrm=$(build_modrm 3 ${regs[$src]} ${regs[$dst]})
-		text_hex+=$(printf "${arith_opcodes[$mnemonic]}" $modrm)
+		local mod_rm=$(build_mod_rm 3 ${regs[$src]} ${regs[$dst]})
+		text_hex+=$(printf "${arith_opcodes[$mnemonic]}" $mod_rm)
 		current_address=$((current_address + 3))
 	elif [[ "$operands" =~ $mem_operands ]]; then
 		# op reg, [mem]
@@ -627,8 +629,7 @@ assemble_arith() {
 			elif [[ "$arg" =~ ^[0-9]+$ ]]; then
 				val=$((arg))
 			else
-				echo "error: unknown immediate value '$arg' in '$mnemonic'" >&2
-				return 1
+				error_msg "unknown immediate value '$arg' in '$mnemonic'"
 			fi
 			if [[ "$reg" == "rax" ]]; then
 				case "$mnemonic" in
@@ -662,13 +663,12 @@ assemble_arith() {
 					or) op_ext=1 ;;
 					and) op_ext=4 ;;
 				esac
-				local modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-				text_hex+=$(printf "4883%02x%02x" "$modrm" "$val")
+				local mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
+				text_hex+=$(printf "4883%02x%02x" "$mod_rm" "$val")
 				current_address=$((current_address + 4))
 			fi
 		else
-			echo "invalid $mnemonic operands: $operands" >&2
-			return 1
+			error_msg "invalid $mnemonic operands: $operands"
 		fi
 	fi
 }
@@ -692,8 +692,7 @@ assemble_mem_operand() {
 
 			# Validate base register exists
 			if [[ -z "${regs[$base_reg]:-}" ]]; then
-				echo "error: invalid base register '$base_reg' in memory operand '$mem_op'" >&2
-				return 1
+				error_msg "invalid base register '$base_reg' in memory operand '$mem_op'"
 			fi
 
 			# determine mod
@@ -718,12 +717,11 @@ assemble_mem_operand() {
 				sib="24" # SIB for [rsp/r12]
 			fi
 
-			local modrm
-			modrm=$(build_modrm "$mod" "$reg_field" "$rm")
-			printf "%s%02x%s%s" "$opcode" "$modrm" "$sib" "$disp_hex"
+			local mod_rm
+			mod_rm=$(build_mod_rm "$mod" "$reg_field" "$rm")
+			printf "%s%02x%s%s" "$opcode" "$mod_rm" "$sib" "$disp_hex"
 		else
-			echo "error: unsupported memory operand in mov: $mem_op" >&2
-			return 1
+			error_msg "unsupported memory operand in mov: $mem_op"
 		fi
 	}
 
@@ -783,14 +781,12 @@ assemble_mem_operand() {
 		esac
 
 		if [[ -z "${labels[$lbl]:-}" ]]; then
-			echo "unknown label $lbl" >&2
-			return 1
+			error_msg "unknown label '$lbl'"
 		fi
 		local target_address=${labels[$lbl]}
 		local offset=$((target_address - (current_address + 2)))
 		if [ "$offset" -lt -128 ] || [ "$offset" -gt 127 ]; then
-			echo "short jump out of range: $offset" >&2
-			return 1
+			error_msg "short jump out of range: $offset"
 		fi
 		local offset_hex=$(printf "%02x" $((offset & 0xff)))
 		text_hex+="$opcode$offset_hex"
@@ -826,8 +822,7 @@ assemble_mem_operand() {
 				name="${BASH_REMATCH[1]}"
 				ref="${BASH_REMATCH[2]}"
 				if [[ -z "${data_label_off[$ref]:-}" ]]; then
-					echo "error at line $line_number: unknown equ reference '$ref' - label not defined in .data section" >&2
-					return 1
+					error_msg "at line $line_number: unknown equ reference '$ref' - label not defined in .data section"
 				fi
 				cur_off=$((${#data_bytes} / 2))
 				val=$((cur_off - data_label_off[$ref]))
@@ -873,9 +868,7 @@ assemble_mem_operand() {
 				continue
 			fi
 
-			echo "error at line $line_number: unsupported data line format: '$line'" >&2
-			echo "supported formats: label db \"string\", label dq number, label equ \$-ref" >&2
-			return 1
+			error_msg "at line $line_number: unsupported data line format: '$line'"
 		elif [[ "$in_section" == "text" ]]; then
 			if [[ "$line" =~ ^([.a-zA-Z0-9_]+):$ ]]; then
 				lbl="${BASH_REMATCH[1]}"
@@ -976,14 +969,10 @@ assemble_mem_operand() {
 			elif [[ "$line" =~ $cvtsd2si_pattern ]]; then
 				text_bytes_len=$((text_bytes_len + 4))
 			else
-				echo "error: unsupported instruction: '$line'" >&2
-				echo "supported instructions: mov, add, sub, cmp, xor, and, or, push, pop, inc, dec, neg, not, call, ret, jmp, je, jne, jg, jl, jge, jle, ja, jb, jae, jbe, jo, jno, js, jns, lea, imul, mul, div, idiv, test, setcc, cmovcc, movzx, movsx, movsxd, shl, shr, sar, and floating point ops" >&2
-				return 1
+				error_msg "unsupported instruction: '$line'"
 			fi
 		else
-			echo "error at line $line_number: instruction outside of section: '$line'" >&2
-			echo "hint: make sure your code is inside 'section .text' or 'section .data'" >&2
-			return 1
+			error_msg "at line $line_number: instruction outside of section: '$line'"
 		fi
 	done
 
@@ -1027,14 +1016,14 @@ assemble_mem_operand() {
 		elif [[ "$line" =~ $movsd_mem_pattern ]]; then
 			reg="${BASH_REMATCH[1]}"
 			reg2="${BASH_REMATCH[2]}"
-			modrm=$((xmm_regs[$reg] << 3 | regs[$reg2]))
-			text_hex+="${fp_opcodes["movsd_mem"]}$(printf "%02x" $modrm)"
+			mod_rm=$((xmm_regs[$reg] << 3 | regs[$reg2]))
+			text_hex+="${fp_opcodes["movsd_mem"]}$(printf "%02x" $mod_rm)"
 			current_address=$((current_address + 4))
 		elif [[ "$line" =~ $cvtsd2si_pattern ]]; then
 			reg="${BASH_REMATCH[1]}"
 			xmm="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 | regs[$reg] << 3 | xmm_regs[$xmm]))
-			text_hex+="${fp_opcodes["cvtsd2si"]}$(printf "%02x" $modrm)"
+			mod_rm=$((0xc0 | regs[$reg] << 3 | xmm_regs[$xmm]))
+			text_hex+="${fp_opcodes["cvtsd2si"]}$(printf "%02x" $mod_rm)"
 			current_address=$((current_address + 4))
 		elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+(r[a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
 			op="${BASH_REMATCH[1]}"
@@ -1050,11 +1039,11 @@ assemble_mem_operand() {
 				echo "error at line $line_number: invalid source register '$src' in '$line'" >&2
 				return 1
 			fi
-			modrm=$((0xc0 | (dst_reg << 3) | src_reg))
+			mod_rm=$((0xc0 | (dst_reg << 3) | src_reg))
 			if [[ "$op" == "movzx" ]]; then
-				text_hex+=$(printf "480fb6%02x" $modrm)
+				text_hex+=$(printf "480fb6%02x" $mod_rm)
 			else
-				text_hex+=$(printf "480fbe%02x" $modrm)
+				text_hex+=$(printf "480fbe%02x" $mod_rm)
 			fi
 			current_address=$((current_address + 4))
 		elif [[ "$line" =~ ^movsxd[[:space:]]+(r[a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
@@ -1070,8 +1059,8 @@ assemble_mem_operand() {
 				echo "error at line $line_number: invalid source register '$src' in '$line'" >&2
 				return 1
 			fi
-			modrm=$((0xc0 | (dst_reg << 3) | src_reg))
-			text_hex+=$(printf "4863%02x" $modrm)
+			mod_rm=$((0xc0 | (dst_reg << 3) | src_reg))
+			text_hex+=$(printf "4863%02x" $mod_rm)
 			current_address=$((current_address + 3))
 		elif [[ "$line" =~ ^mov ]]; then
 			local mov_operands="${line#mov }"
@@ -1082,8 +1071,8 @@ assemble_mem_operand() {
 
 			if [[ "$dst" =~ ^r[a-z]{2}$ && "$src" =~ ^r[a-z]{2}$ ]]; then
 				# mov reg, reg
-				modrm=$((0xc0 + regs[$src] * 8 + regs[$dst]))
-				text_hex+=$(printf "4889%02x" "$modrm")
+				mod_rm=$((0xc0 + regs[$src] * 8 + regs[$dst]))
+				text_hex+=$(printf "4889%02x" "$mod_rm")
 				current_address=$((current_address + 3))
 			elif [[ "$dst" =~ ^\[.*\]$ ]]; then # mov [mem], reg
 				hex_code=$(assemble_mem_operand "$dst" "${regs[$src]}" "4889")
@@ -1107,8 +1096,7 @@ assemble_mem_operand() {
 						val=$((arg))
 						val_is_immediate=1
 					else
-						echo "error: invalid integer format '$arg'" >&2
-						return 1
+						error_msg "invalid integer format '$arg'"
 					fi
 				elif [[ -n "${equs[$arg]:-}" ]]; then
 					val=${equs[$arg]}
@@ -1168,9 +1156,9 @@ assemble_mem_operand() {
 			np) cc=0x4b ;;
 			*) echo "unknown cmov condition $cond" >&2; return 1 ;;
 			esac
-			modrm=$((0xc0 | (regs[$dst] << 3) | regs[$src]))
+			mod_rm=$((0xc0 | (regs[$dst] << 3) | regs[$src]))
 			text_hex+="48"
-			text_hex+=$(printf "0f%02x%02x" "$cc" "$modrm")
+			text_hex+=$(printf "0f%02x%02x" "$cc" "$mod_rm")
 			current_address=$((current_address + 4))
 		elif [[ "$line" =~ ^(syscall|nop|ret|leave|cqo|cdqe)$ ]]; then
 			# Handle simple instructions using lookup table
@@ -1184,8 +1172,8 @@ assemble_mem_operand() {
 			esac
 elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
 			reg="${BASH_REMATCH[1]}"
-			modrm=$((0xc0 + regs[$reg] * 8 + regs[$reg]))
-			text_hex+=$(printf "4831%02x" $modrm)
+			mod_rm=$((0xc0 + regs[$reg] * 8 + regs[$reg]))
+			text_hex+=$(printf "4831%02x" $mod_rm)
 			current_address=$((current_address + 3))
 				elif [[ "$line" =~ ^push[[:space:]]+(r[a-z]{2})$ ]]; then
 			reg="${BASH_REMATCH[1]}"
@@ -1209,13 +1197,13 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 				# op reg, reg
 				local reg1="$dst"
 				local reg2="$src"
-				local modrm=$((0xc0 | (regs[$reg2] << 3) | regs[$reg1]))
+				local mod_rm=$((0xc0 | (regs[$reg2] << 3) | regs[$reg1]))
 				case "$op" in
-				add) text_hex+=$(printf "4801%02x" $modrm) ;;
-				sub) text_hex+=$(printf "4829%02x" $modrm) ;;
-				and) text_hex+=$(printf "4821%02x" $modrm) ;;
-				or) text_hex+=$(printf "4809%02x" $modrm) ;;
-				cmp) text_hex+=$(printf "4839%02x" $modrm) ;;
+				add) text_hex+=$(printf "4801%02x" $mod_rm) ;;
+				sub) text_hex+=$(printf "4829%02x" $mod_rm) ;;
+				and) text_hex+=$(printf "4821%02x" $mod_rm) ;;
+				or) text_hex+=$(printf "4809%02x" $mod_rm) ;;
+				cmp) text_hex+=$(printf "4839%02x" $mod_rm) ;;
 				esac
 				current_address=$((current_address + 3))
 			elif [[ "$dst" =~ ^\[.*\]$ || "$src" =~ ^\[.*\]$ ]]; then
@@ -1267,8 +1255,8 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 					or) op_ext=1 ;;
 					and) op_ext=4 ;;
 					esac
-					modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-					text_hex+=$(printf "4883%02x%02x" "$modrm" "$val")
+					mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
+					text_hex+=$(printf "4883%02x%02x" "$mod_rm" "$val")
 					current_address=$((current_address + 4))
 				fi
 			fi
@@ -1280,26 +1268,25 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 	reg="${BASH_REMATCH[2]}"
 	op_ext=0
 	if [[ "$op" == "inc" ]]; then
-		modrm=$((0xc0 + regs[$reg]))
-		text_hex+=$(printf "48ff%02x" $modrm)
+		mod_rm=$((0xc0 + regs[$reg]))
+		text_hex+=$(printf "48ff%02x" $mod_rm)
 	elif [[ "$op" == "dec" ]]; then
-		modrm=$((0xc8 + regs[$reg]))
-		text_hex+=$(printf "48ff%02x" $modrm)
+		mod_rm=$((0xc8 + regs[$reg]))
+		text_hex+=$(printf "48ff%02x" $mod_rm)
 	elif [[ "$op" == "neg" ]]; then
 		op_ext=3
-		modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-		text_hex+=$(printf "48f7%02x" $modrm)
+		mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
+		text_hex+=$(printf "48f7%02x" $mod_rm)
 	elif [[ "$op" == "not" ]]; then
 		op_ext=2
-		modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-		text_hex+=$(printf "48f7%02x" $modrm)
+		mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
+		text_hex+=$(printf "48f7%02x" $mod_rm)
 	fi
 			current_address=$((current_address + 3))
 				elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
 			lbl="${BASH_REMATCH[1]}"
 			if [[ -z "${labels[$lbl]:-}" ]]; then
-				echo "error: unknown label '$lbl' in call instruction '$line'" >&2
-				return 1
+				error_msg "unknown label '$lbl' in call instruction '$line'"
 			fi
 			target_address=${labels[$lbl]}
 			offset=$((target_address - (current_address + 5)))
@@ -1314,14 +1301,14 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 			div) op_ext=6 ;;
 			idiv) op_ext=7 ;;
 			esac
-			modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-			text_hex+=$(printf "48f7%02x" $modrm)
+			mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
+			text_hex+=$(printf "48f7%02x" $mod_rm)
 			current_address=$((current_address + 3))
 				elif [[ "$line" =~ ^imul[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
 			reg1="${BASH_REMATCH[1]}"
 			reg2="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 | (regs[$reg1] << 3) | regs[$reg2]))
-			text_hex+=$(printf "480faf%02x" $modrm)
+			mod_rm=$((0xc0 | (regs[$reg1] << 3) | regs[$reg2]))
+			text_hex+=$(printf "480faf%02x" $mod_rm)
 			current_address=$((current_address + 4))
 		elif [[ "$line" =~ ^lea[[:space:]]+(r[a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
 			reg="${BASH_REMATCH[1]}"
@@ -1331,8 +1318,8 @@ elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BA
 				return 1
 			fi
 			addr=$((data_vaddr + data_label_off[$lbl]))
-			modrm=$(((regs[$reg] << 3) | 5))
-			text_hex+=$(printf "488d%02x" $modrm)
+			mod_rm=$(((regs[$reg] << 3) | 5))
+			text_hex+=$(printf "488d%02x" $mod_rm)
 			# RIP-relative addressing, offset is from the *next* instruction
 			offset=$((addr - (text_vaddr + current_address + 7)))
 			text_hex+=$(u32le $offset)
@@ -1349,14 +1336,14 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 	elif [[ "$op" == "sar" ]]; then
 		op_ext=7
 	fi
-	modrm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-	text_hex+=$(printf "48c1%02x%02x" $modrm $val)
+	mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
+	text_hex+=$(printf "48c1%02x%02x" $mod_rm $val)
 			current_address=$((current_address + 4))
 		elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
 			reg1="${BASH_REMATCH[1]}"
 			reg2="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 | (regs[$reg2] << 3) | regs[$reg1]))
-			text_hex+=$(printf "4885%02x" $modrm)
+			mod_rm=$((0xc0 | (regs[$reg2] << 3) | regs[$reg1]))
+			text_hex+=$(printf "4885%02x" $mod_rm)
 			current_address=$((current_address + 3))
 				elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
 			reg="${BASH_REMATCH[1]}"
@@ -1366,43 +1353,44 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 			else
 				val=$((arg))
 			fi
-			modrm=$((0xc0 | regs[$reg]))
-							text_hex+=$(printf "48f7%02x" "$modrm")$(u32le "$val")
+			mod_rm=$((0xc0 | regs[$reg]))
+							text_hex+=$(printf "48f7%02x" "$mod_rm")$(u32le "$val")
 						current_address=$((current_address + 7))
 					elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
 			cond="${BASH_REMATCH[1]}"
 			dst="${BASH_REMATCH[2]}"
 			dst_reg=$(get_reg_num "$dst")
 			if (( dst_reg < 0 )); then
-				echo "error at line $line_number: invalid register '$dst' in '$line'" >&2
-				return 1
+				error_msg "at line $line_number: invalid destination register '$dst' in '$line'"
 			fi
-			modrm=$((0xc0 | dst_reg))
+			if (( src_reg < 0 )); then
+				error_msg "at line $line_number: invalid source register '$src' in '$line'"
+			fi
+			mod_rm=$((0xc0 | dst_reg))
 			
 			case "$cond" in
-			e|z) text_hex+=$(printf "0f94%02x" $modrm) ;;
-			ne|nz) text_hex+=$(printf "0f95%02x" $modrm) ;;
-			a) text_hex+=$(printf "0f97%02x" $modrm) ;;
-			ae) text_hex+=$(printf "0f93%02x" $modrm) ;;
-			b) text_hex+=$(printf "0f92%02x" $modrm) ;;
-			be) text_hex+=$(printf "0f96%02x" $modrm) ;;
-			g) text_hex+=$(printf "0f9f%02x" $modrm) ;;
-			ge) text_hex+=$(printf "0f9d%02x" $modrm) ;;
-			l) text_hex+=$(printf "0f9c%02x" $modrm) ;;
-			le) text_hex+=$(printf "0f9e%02x" $modrm) ;;
-			o) text_hex+=$(printf "0f90%02x" $modrm) ;;
-			no) text_hex+=$(printf "0f91%02x" $modrm) ;;
-			s) text_hex+=$(printf "0f98%02x" $modrm) ;;
-			ns) text_hex+=$(printf "0f99%02x" $modrm) ;;
+			e|z) text_hex+=$(printf "0f94%02x" $mod_rm) ;;
+			ne|nz) text_hex+=$(printf "0f95%02x" $mod_rm) ;;
+			a) text_hex+=$(printf "0f97%02x" $mod_rm) ;;
+			ae) text_hex+=$(printf "0f93%02x" $mod_rm) ;;
+			b) text_hex+=$(printf "0f92%02x" $mod_rm) ;;
+			be) text_hex+=$(printf "0f96%02x" $mod_rm) ;;
+			g) text_hex+=$(printf "0f9f%02x" $mod_rm) ;;
+			ge) text_hex+=$(printf "0f9d%02x" $mod_rm) ;;
+			l) text_hex+=$(printf "0f9c%02x" $mod_rm) ;;
+			le) text_hex+=$(printf "0f9e%02x" $mod_rm) ;;
+			o) text_hex+=$(printf "0f90%02x" $mod_rm) ;;
+			no) text_hex+=$(printf "0f91%02x" $mod_rm) ;;
+			s) text_hex+=$(printf "0f98%02x" $mod_rm) ;;
+			ns) text_hex+=$(printf "0f99%02x" $mod_rm) ;;
 			esac
 			current_address=$((current_address + 3))
 		else
-			echo "internal error assembling: $line" >&2
-			return 1
+			error_msg "internal error assembling: $line"
 		fi
 	done
 
-	tmpf="$(mktemp)" || { echo "error: failed to create temporary file" >&2; return 1; }
+	tmpf="$(mktemp)" || error_msg "failed to create temporary file"
 	# build elf header in hex
 	header_hex=""
 	header_hex+="7f454c46"
@@ -1440,8 +1428,7 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 	# Calculate expected header size from hex string length (each 2 hex chars = 1 byte)
 	cur_size=$((${#header_hex} / 2))
 	if ((cur_size > file_text_off)); then
-		echo "header too big" >&2
-		return 1
+		error_msg "header too big"
 	fi
 	pad=$((file_text_off - cur_size))
 	generate_zeros "$pad" >>"$tmpf"
@@ -1457,11 +1444,11 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 	if [ "$actual_size" -ne "$filesz" ]; then
 		filesz=$actual_size
 		seek=$((0x38))
-		pf="$(u64le "$filesz")$(u64le "$filesz")"
-		# Create a temporary file with the binary data, then write at specific offset using pure bash
-		local temp_bin
-		temp_bin=$(mktemp) || { echo "error: failed to create temporary file for patch" >&2; rm -f "$tmpf"; return 1; }
-		hex_to_bin "$pf" > "$temp_bin"
+	patch_data="$(u64le "$filesz")$(u64le "$filesz")"
+	# Create a temporary file with the binary data, then write at specific offset using pure bash
+	local temp_bin
+	temp_bin=$(mktemp) || { error_msg "failed to create temporary file for patch"; rm -f "$tmpf"; return 1; }
+	hex_to_bin "$patch_data" > "$temp_bin"
 		write_at_offset "$temp_bin" "$tmpf" "$seek"
 		rm -f "$temp_bin"
 	fi
