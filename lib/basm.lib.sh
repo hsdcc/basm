@@ -300,6 +300,114 @@ basm_assemble() {
 		fi
 	}
 
+	# Helper function to calculate MOV instruction size based on addressing mode
+	calculate_mov_size() {
+		arg="${BASH_REMATCH[2]}"
+		if [[ "$arg" =~ ^\[(r[a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
+			base="${BASH_REMATCH[1]}"
+			disp="${BASH_REMATCH[2]:-}"
+			size=4
+			if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+				if [[ -z "$disp" ]]; then
+					size=4
+				else
+					val=$disp
+					if (( val >= -128 && val <= 127 )); then
+						size=5
+					else
+						size=8
+					fi
+				fi
+			else
+				if [[ -z "$disp" ]]; then
+					size=3
+				elif [[ "$base" == "rbp" || "$base" == "r13" ]]; then
+					size=4
+				else
+					val=$disp
+					if (( val >= -128 && val <= 127 )); then
+						size=4
+					else
+						size=7
+					fi
+				fi
+			fi
+			text_bytes_len=$((text_bytes_len + size))
+		elif [[ "$arg" =~ ^\[(r[a-z]{2})([\+\-][0-9]+)?\],[[:space:]]+(r[a-z]{2})$ ]]; then
+			base="${BASH_REMATCH[1]}"
+			disp="${BASH_REMATCH[2]:-}"
+			size=4
+			if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+				if [[ -z "$disp" ]]; then
+					size=4
+				else
+					val=$disp
+					if (( val >= -128 && val <= 127 )); then
+						size=5
+					else
+						size=8
+					fi
+				fi
+			else
+				if [[ -z "$disp" ]]; then
+					size=3
+				elif [[ "$base" == "rbp" || "$base" == "r13" ]]; then
+					size=4
+				else
+					val=$disp
+					if (( val >= -128 && val <= 127 )); then
+						size=4
+					else
+						size=7
+					fi
+				fi
+			fi
+			text_bytes_len=$((text_bytes_len + size))
+		elif [[ "$arg" =~ ^[0-9]+$ ]] || [[ "$arg" =~ ^-?[0-9]+$ ]] || [[ "$arg" =~ ^0x[0-9a-fA-F]+$ ]] || [[ -n "${equs[$arg]:-}" ]]; then
+			if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+				val=$((16#${BASH_REMATCH[1]}))
+			elif [[ "$arg" =~ ^-?[0-9]+$ ]]; then
+				val=$((arg))
+			elif [[ -n "${equs[$arg]:-}" ]]; then
+				val=${equs[$arg]}
+			fi
+			if (( val >= -2147483648 && val <= 2147483647 )); then
+				text_bytes_len=$((text_bytes_len + 7))
+			else
+				text_bytes_len=$((text_bytes_len + 10))
+			fi
+		else
+			text_bytes_len=$((text_bytes_len + 10))
+		fi
+	}
+
+	# Helper function to calculate arithmetic reg,imm size based on register and value
+	calculate_arith_ri_size() {
+		reg="${BASH_REMATCH[2]}"
+		arg="${BASH_REMATCH[3]}"
+		if [[ "$reg" == "rax" ]]; then
+			if [[ "$line" =~ ^cmp.*$ ]]; then
+				text_bytes_len=$((text_bytes_len + 6))
+			else
+				text_bytes_len=$((text_bytes_len + 7))
+			fi
+		else
+			text_bytes_len=$((text_bytes_len + 4))
+		fi
+	}
+
+	# Helper function to calculate simple instruction size
+	calculate_simple_instr_size() {
+		case "$line" in
+			syscall) text_bytes_len=$((text_bytes_len + 2)) ;;
+			nop) text_bytes_len=$((text_bytes_len + 1)) ;;
+			ret) text_bytes_len=$((text_bytes_len + 1)) ;;
+			leave) text_bytes_len=$((text_bytes_len + 1)) ;;
+			cqo) text_bytes_len=$((text_bytes_len + 2)) ;;
+			cdqe) text_bytes_len=$((text_bytes_len + 2)) ;;
+		esac
+	}
+
 	# Helper function to handle floating point operations
 	handle_fp_operation() {
 		local op_name="$1"
@@ -587,146 +695,74 @@ basm_assemble() {
 				continue
 			fi
 			text_ins+=("$line")
+			
+			# Handle mov reg, reg (3 bytes)
 			if [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 3))
+			# Handle CMOV (4 bytes)
 			elif [[ "$line" =~ $cmov_pattern ]]; then
 				text_bytes_len=$((text_bytes_len + 4))
-			
+			# Handle various MOV patterns
 			elif [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(.*)$ ]]; then
-				arg="${BASH_REMATCH[2]}"
-				if [[ "$arg" =~ ^\[(r[a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
-					base="${BASH_REMATCH[1]}"
-					disp="${BASH_REMATCH[2]:-}"
-					size=4
-					if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
-						if [[ -z "$disp" ]]; then
-							size=4
-						else
-							val=$disp
-							if (( val >= -128 && val <= 127 )); then
-								size=5
-							else
-								size=8
-							fi
-						fi
-					else
-						if [[ -z "$disp" ]]; then
-							size=3
-						elif [[ "$base" == "rbp" || "$base" == "r13" ]]; then
-							size=4
-						else
-							val=$disp
-							if (( val >= -128 && val <= 127 )); then
-								size=4
-							else
-								size=7
-							fi
-						fi
-					fi
-					text_bytes_len=$((text_bytes_len + size))
-				elif [[ "$arg" =~ ^\[(r[a-z]{2})([\+\-][0-9]+)?\],[[:space:]]+(r[a-z]{2})$ ]]; then
-					base="${BASH_REMATCH[1]}"
-					disp="${BASH_REMATCH[2]:-}"
-					size=4
-					if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
-						if [[ -z "$disp" ]]; then
-							size=4
-						else
-							val=$disp
-							if (( val >= -128 && val <= 127 )); then
-								size=5
-							else
-								size=8
-							fi
-						fi
-					else
-						if [[ -z "$disp" ]]; then
-							size=3
-						elif [[ "$base" == "rbp" || "$base" == "r13" ]]; then
-							size=4
-						else
-							val=$disp
-							if (( val >= -128 && val <= 127 )); then
-								size=4
-							else
-								size=7
-							fi
-						fi
-					fi
-					text_bytes_len=$((text_bytes_len + size))
-				elif [[ "$arg" =~ ^[0-9]+$ ]] || [[ "$arg" =~ ^-?[0-9]+$ ]] || [[ "$arg" =~ ^0x[0-9a-fA-F]+$ ]] || [[ -n "${equs[$arg]:-}" ]]; then
-					if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
-						val=$((16#${BASH_REMATCH[1]}))
-					elif [[ "$arg" =~ ^-?[0-9]+$ ]]; then
-						val=$((arg))
-					elif [[ -n "${equs[$arg]:-}" ]]; then
-						val=${equs[$arg]}
-					fi
-					if (( val >= -2147483648 && val <= 2147483647 )); then
-						text_bytes_len=$((text_bytes_len + 7))
-					else
-						text_bytes_len=$((text_bytes_len + 10))
-					fi
-				else
-					text_bytes_len=$((text_bytes_len + 10))
-				fi
+				calculate_mov_size
+			# Handle simple instructions (1-2 bytes)
 			elif [[ "$line" =~ ^(syscall|nop|ret|leave|cqo|cdqe)$ ]]; then
-				# Handle simple instructions using lookup table
-				case "$line" in
-					syscall) text_bytes_len=$((text_bytes_len + 2)) ;;
-					nop) text_bytes_len=$((text_bytes_len + 1)) ;;
-					ret) text_bytes_len=$((text_bytes_len + 1)) ;;
-					leave) text_bytes_len=$((text_bytes_len + 1)) ;;
-					cqo) text_bytes_len=$((text_bytes_len + 2)) ;;
-					cdqe) text_bytes_len=$((text_bytes_len + 2)) ;;
-				esac
-elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
+				calculate_simple_instr_size
+			# Handle XOR reg, reg with same register (3 bytes)
+			elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
 				text_bytes_len=$((text_bytes_len + 3))
+			# Handle PUSH/POP (1 byte each)
 			elif [[ "$line" =~ ^(push|pop)[[:space:]]+(r[a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 1))
+			# Handle arithmetic reg, reg (3 bytes)
 			elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 3))
-						elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]*(.*)$ ]]; then
-				reg="${BASH_REMATCH[2]}"
-				arg="${BASH_REMATCH[3]}"
-				if [[ "$reg" == "rax" ]]; then
-					if [[ "$line" =~ ^cmp.*$ ]]; then
-						text_bytes_len=$((text_bytes_len + 6))
-					else
-						text_bytes_len=$((text_bytes_len + 7))
-					fi
-				else
-					text_bytes_len=$((text_bytes_len + 4))
-				fi
+			# Handle arithmetic reg, immediate/memory
+			elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]*(.*)$ ]]; then
+				calculate_arith_ri_size
+			# Handle jumps (2 bytes)
 			elif [[ "$line" =~ ^(je|jne|jg|jl|jge|jle|ja|jb|jae|jbe|jo|jno|js|jns|jmp)[[:space:]]+(.*)$ ]]; then
 				text_bytes_len=$((text_bytes_len + 2))
+			# Handle loops (2 bytes)
 			elif [[ "$line" =~ ^(loop|loope|loopne)[[:space:]]+(.*)$ ]]; then
 				text_bytes_len=$((text_bytes_len + 2))
-elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
-	text_bytes_len=$((text_bytes_len + 3))
-						elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
+			# Handle unary operations (inc, dec, neg, not) (3 bytes)
+			elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
+				text_bytes_len=$((text_bytes_len + 3))
+			# Handle CALL (5 bytes)
+			elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
 				text_bytes_len=$((text_bytes_len + 5))
+			# Handle MUL/DIV/IDIV (3 bytes)
 			elif [[ "$line" =~ ^(mul|div|idiv)[[:space:]]+(r[a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 3))
-						elif [[ "$line" =~ ^(imul)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
+			# Handle IMUL reg, reg (4 bytes)
+			elif [[ "$line" =~ ^(imul)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 4))
+			# Handle LEA (7 bytes)
 			elif [[ "$line" =~ ^lea[[:space:]]+(r[a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
 				text_bytes_len=$((text_bytes_len + 7))
-elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
-	text_bytes_len=$((text_bytes_len + 4))
+			# Handle shifts (4 bytes)
+			elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
+				text_bytes_len=$((text_bytes_len + 4))
+			# Handle TEST reg, reg (3 bytes)
 			elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 3))
-						elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
+			# Handle TEST reg, immediate (7 bytes)
+			elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
 				text_bytes_len=$((text_bytes_len + 7))
+			# Handle MOVZX/MOVSX with 8/16-bit registers (4 bytes)
 			elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+(r[a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh])$ ]]; then
 				text_bytes_len=$((text_bytes_len + 4))
+			# Handle MOVZX/MOVSX with 32/64-bit registers (4 bytes)
 			elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 4))
+			# Handle MOVSXD (3 bytes)
 			elif [[ "$line" =~ ^movsxd[[:space:]]+(r[a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 3))
-						elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
+			# Handle SETCC (3 bytes)
+			elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
 				text_bytes_len=$((text_bytes_len + 3))
-						# floating point instructions
+			# Handle floating point instructions (4 bytes each)
 			elif [[ "$line" =~ $movss_rr_pattern ]]; then
 				text_bytes_len=$((text_bytes_len + 4))
 			elif [[ "$line" =~ $movsd_rr_pattern ]]; then
@@ -751,7 +787,6 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 				text_bytes_len=$((text_bytes_len + 4))
 			elif [[ "$line" =~ $cvtsd2si_pattern ]]; then
 				text_bytes_len=$((text_bytes_len + 4))
-
 			else
 				echo "error: unsupported instruction: '$line'" >&2
 				echo "supported instructions: mov, add, sub, cmp, xor, and, or, push, pop, inc, dec, neg, not, call, ret, jmp, je, jne, jg, jl, jge, jle, ja, jb, jae, jbe, jo, jno, js, jns, lea, imul, mul, div, idiv, test, setcc, cmovcc, movzx, movsx, movsxd, shl, shr, sar, and floating point ops" >&2
