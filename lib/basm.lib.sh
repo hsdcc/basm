@@ -351,7 +351,7 @@ basm_assemble() {
 		local size=4
 		if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
 			if [[ -z "$disp" ]]; then
-				size=4
+				size=3
 			else
 				if (( disp >= -128 && disp <= 127 )); then
 					size=5
