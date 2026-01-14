@@ -300,6 +300,17 @@ basm_assemble() {
 		fi
 	}
 
+	# Helper function to handle floating point operations
+	handle_fp_operation() {
+		local op_name="$1"
+		local size="$2"
+		local dst="${BASH_REMATCH[1]}"
+		local src="${BASH_REMATCH[2]}"
+		local modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
+		text_hex+="${fp_opcodes["$op_name"]}$(printf "%02x" $modrm)"
+		current_address=$((current_address + size))
+	}
+
 	append_instruction() {
 		local hex=$1 size=$2
 		text_hex+=$hex
@@ -769,67 +780,27 @@ elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]
 	text_hex=""
 	current_address=0
 	for line in "${text_ins[@]}"; do
-		# Check for floating point operations first using our lookup table
+		# Handle floating point operations with a generalized function approach for register-register ops
 		if [[ "$line" =~ $movss_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="${fp_opcodes["movss_rr"]}$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
+			handle_fp_operation "movss_rr" 4
 		elif [[ "$line" =~ $movsd_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="${fp_opcodes["movsd_rr"]}$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
+			handle_fp_operation "movsd_rr" 4
 		elif [[ "$line" =~ $addss_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="${fp_opcodes["addss_rr"]}$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
+			handle_fp_operation "addss_rr" 4
 		elif [[ "$line" =~ $addsd_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="${fp_opcodes["addsd_rr"]}$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
+			handle_fp_operation "addsd_rr" 4
 		elif [[ "$line" =~ $mulss_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="${fp_opcodes["mulss_rr"]}$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
+			handle_fp_operation "mulss_rr" 4
 		elif [[ "$line" =~ $mulsd_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="${fp_opcodes["mulsd_rr"]}$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
+			handle_fp_operation "mulsd_rr" 4
 		elif [[ "$line" =~ $subss_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="${fp_opcodes["subss_rr"]}$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
+			handle_fp_operation "subss_rr" 4
 		elif [[ "$line" =~ $subsd_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="${fp_opcodes["subsd_rr"]}$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
+			handle_fp_operation "subsd_rr" 4
 		elif [[ "$line" =~ $divss_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="${fp_opcodes["divss_rr"]}$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
+			handle_fp_operation "divss_rr" 4
 		elif [[ "$line" =~ $divsd_rr_pattern ]]; then
-			dst="${BASH_REMATCH[1]}"
-			src="${BASH_REMATCH[2]}"
-			modrm=$((0xc0 + xmm_regs[$dst] * 8 + xmm_regs[$src]))
-			text_hex+="${fp_opcodes["divsd_rr"]}$(printf "%02x" $modrm)"
-			current_address=$((current_address + 4))
+			handle_fp_operation "divsd_rr" 4
 		elif [[ "$line" =~ $movsd_mem_pattern ]]; then
 			reg="${BASH_REMATCH[1]}"
 			reg2="${BASH_REMATCH[2]}"
