@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+
+# floating point operation lookup tables
+declare -A fp_opcodes
+fp_opcodes["movss_rr"]="f30f10"
+fp_opcodes["movsd_rr"]="f20f10"
+fp_opcodes["addss_rr"]="f30f58"
+fp_opcodes["addsd_rr"]="f20f58"
+fp_opcodes["mulss_rr"]="f30f59"
+fp_opcodes["mulsd_rr"]="f20f59"
+fp_opcodes["subss_rr"]="f30f5c"
+fp_opcodes["subsd_rr"]="f20f5c"
+fp_opcodes["divss_rr"]="f30f5e"
+fp_opcodes["divsd_rr"]="f20f5e"
+fp_opcodes["movsd_mem"]="f20f10"
+fp_opcodes["cvtsd2si"]="f20f2d"
+
+# register encoding map for mod_rm byte
+declare -A regs
+regs["rax"]=0
+regs["rcx"]=1
+regs["rdx"]=2
+regs["rbx"]=3
+regs["rsp"]=4
+regs["rbp"]=5
+regs["rsi"]=6
+regs["rdi"]=7
+
+# xmm registers for floating point
+declare -A xmm_regs
+xmm_regs["xmm0"]=0
+xmm_regs["xmm1"]=1
+xmm_regs["xmm2"]=2
+xmm_regs["xmm3"]=3
+xmm_regs["xmm4"]=4
+xmm_regs["xmm5"]=5
+xmm_regs["xmm6"]=6
+xmm_regs["xmm7"]=7
+xmm_regs["xmm8"]=8
+xmm_regs["xmm9"]=9
+xmm_regs["xmm10"]=10
+xmm_regs["xmm11"]=11
+xmm_regs["xmm12"]=12
+xmm_regs["xmm13"]=13
+xmm_regs["xmm14"]=14
+xmm_regs["xmm15"]=15
+
+# opcode arrays for cleaner dispatch
+declare -A arith_opcodes
+arith_opcodes["add"]="4801%02x"
+arith_opcodes["sub"]="4829%02x"
+arith_opcodes["or"]="4809%02x"
+arith_opcodes["and"]="4821%02x"
+arith_opcodes["cmp"]="4839%02x"
+
+declare -A jump_opcodes
+jump_opcodes["je"]="74"
+jump_opcodes["jne"]="75"
+jump_opcodes["jg"]="7f"
+jump_opcodes["jl"]="7c"
+jump_opcodes["jge"]="7d"
+jump_opcodes["jle"]="7e"
+jump_opcodes["ja"]="77"
+jump_opcodes["jb"]="72"
+jump_opcodes["jae"]="73"
+jump_opcodes["jbe"]="76"
+jump_opcodes["jo"]="70"
+jump_opcodes["jno"]="71"
+jump_opcodes["js"]="78"
+jump_opcodes["jns"]="79"
+jump_opcodes["jmp"]="eb"
+
+declare -A loop_opcodes
+loop_opcodes["loop"]="e2"
+loop_opcodes["loope"]="e1"
+loop_opcodes["loopne"]="e0"
+
+declare -A unary_op_ext
+unary_op_ext["inc"]=0
+unary_op_ext["dec"]=1
+unary_op_ext["neg"]=3
+unary_op_ext["not"]=2
+
+declare -A shift_op_ext
+shift_op_ext["shl"]=4
+shift_op_ext["shr"]=5
+shift_op_ext["sar"]=7
+
+declare -A mul_op_ext
+mul_op_ext["mul"]=4
+mul_op_ext["div"]=6
+mul_op_ext["idiv"]=7
+
+declare -A cmov_codes
+cmov_codes["e"]=0x44
+cmov_codes["ne"]=0x45
+cmov_codes["a"]=0x47
+cmov_codes["ae"]=0x43
+cmov_codes["b"]=0x42
+cmov_codes["be"]=0x46
+cmov_codes["g"]=0x4f
+cmov_codes["ge"]=0x4d
+cmov_codes["l"]=0x4c
+cmov_codes["le"]=0x4e
+cmov_codes["o"]=0x40
+cmov_codes["no"]=0x41
+cmov_codes["s"]=0x48
+cmov_codes["ns"]=0x49
+cmov_codes["p"]=0x4a
+cmov_codes["np"]=0x4b
