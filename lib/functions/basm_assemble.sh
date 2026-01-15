@@ -49,8 +49,8 @@ basm_assemble() {
     fi
 
     if [[ "$mode" == "obj" ]]; then
-        # Generate object file format
-        generate_object_file "$text_hex" "$data_bytes" "labels" "equs" "$outfile"
+        # Generate object file with proper sections
+        generate_elf_object_with_symbols "$text_hex" "$data_bytes" "labels" "equs" "$outfile"
     else
         # build elf header for executable
         local header_hex
