@@ -33,7 +33,11 @@ basm_assemble() {
     # Calculate sizes after first pass
     code_size=$text_bytes_len
     data_size=$((${#data_bytes} / 2))
+    rodata_size=$((${#rodata_bytes} / 2))
+    bss_size=$((${#bss_bytes} / 2))
     file_data_off=$((file_text_off + code_size))
+    file_rodata_off=$((file_data_off + data_size))
+    file_bss_off=$((file_rodata_off + rodata_size))
 
     if [[ "$mode" != "obj" ]]; then
         # Only calculate real addresses for executables

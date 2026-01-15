@@ -8,14 +8,20 @@ first_pass() {
     
     # re-initialize variables for first pass
     data_bytes=""
+    rodata_bytes=""
+    bss_bytes=""
     text_ins=()
     text_bytes_len=0
+    rodata_bytes_len=0
+    bss_bytes_len=0
     in_section=""
     line_number=0
     
     # declare associative arrays
     declare -gA labels
     declare -gA data_label_off
+    declare -gA rodata_label_off
+    declare -gA bss_label_off
     declare -gA equs
     declare -gA externals  # For tracking external symbols in object mode
     
@@ -35,6 +41,20 @@ first_pass() {
             ;;
         section\ .text)
             in_section="text"
+            continue
+            ;;
+        section\ .rodata)
+            in_section="rodata"
+            continue
+            ;;
+        section\ .bss)
+            in_section="bss"
+            continue
+            ;;
+        section\ .*)
+            # Handle any other sections that start with .sectionname
+            in_section="${line#section .}"
+            in_section=$(trim_string "$in_section")
             continue
             ;;
         global\ *) continue ;;
@@ -93,6 +113,69 @@ first_pass() {
             fi
 
             error_msg "at line $line_number: unsupported data line format: '$line'"
+            return 1
+        elif [[ "$in_section" == "rodata" ]]; then
+            if [[ "$line" =~ $db_pattern ]]; then
+                name="${BASH_REMATCH[1]}"
+                txt="${BASH_REMATCH[2]}"
+                extra="${BASH_REMATCH[4]}"
+                # process escape sequences using pure bash
+                txt="${txt//\\/\\\\x5c}"    # replace \ with \\x5c
+                txt="${txt//
+/\\n}"          # replace newlines with \n
+                txt="${txt//\"/\\\"}"           # replace " with \"
+                hex=""
+                i=0
+                while [ "$i" -lt ${#txt} ]; do
+                    ch="${txt:$i:1}"
+                    oc=$(printf "%d" "'$ch")
+                    hex+="$(printf "%02x" "$oc")"
+                    i=$((i + 1))
+                done
+                if [ -n "$extra" ]; then
+                    hex+="$(printf "%02x" "$extra")"
+                fi
+                # Use rodata_label_off for rodata section
+                declare -gA rodata_label_off
+                rodata_label_off["$name"]=$((${#rodata_bytes} / 2))
+                rodata_bytes+="$hex"
+                continue
+            fi
+
+            if [[ "$line" =~ $dq_pattern ]]; then
+                name="${BASH_REMATCH[1]}"
+                val="${BASH_REMATCH[2]}"
+                if [[ "$val" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+                    val=$((16#${BASH_REMATCH[1]}))
+                else
+                    val=$((val))
+                fi
+                rodata_label_off["$name"]=$((${#rodata_bytes} / 2))
+                rodata_bytes+=$(u64le $val)
+                continue
+            fi
+
+            error_msg "at line $line_number: unsupported rodata line format: '$line'"
+            return 1
+        elif [[ "$in_section" == "bss" ]]; then
+            # BSS section contains uninitialized data - just record sizes
+            if [[ "$line" =~ $dq_pattern ]]; then
+                name="${BASH_REMATCH[1]}"
+                val="${BASH_REMATCH[2]}"
+                if [[ "$val" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+                    val=$((16#${BASH_REMATCH[1]}))
+                else
+                    val=$((val))
+                fi
+                # For BSS, we just reserve space - no data content
+                declare -gA bss_label_off
+                bss_label_off["$name"]=$((${#bss_bytes} / 2))
+                # Add zero bytes for the size specified
+                bss_bytes+=$(generate_zeros $val)
+                continue
+            fi
+
+            error_msg "at line $line_number: unsupported bss line format: '$line'"
             return 1
         elif [[ "$in_section" == "text" ]]; then
             if [[ "$line" =~ ^([.a-zA-Z0-9_]+):$ ]]; then
