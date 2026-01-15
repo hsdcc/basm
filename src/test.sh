@@ -264,6 +264,42 @@ _start:
     mov rax, 1
     ret" || failed_tests=$((failed_tests + 1))
 
+# Test linking functionality
+echo "	testing linking_basic"
+asm1="section .text
+_start:
+    mov rax, 1
+    mov rdi, 1
+    mov rsi, msg
+    mov rdx, 5
+    syscall
+    ret
+
+section .data
+msg: db \"hello\", 0"
+
+obj1="$(mktemp).o"
+exe1="$(mktemp)"
+
+if ! basm_assemble "$asm1" "$obj1" "obj"; then
+    echo "	[FAIL] linking_basic: failed to create object file"
+    failed_tests=$((failed_tests + 1))
+else
+    if ! link_objects "$obj1" "$exe1"; then
+        echo "	[FAIL] linking_basic: failed to link objects"
+        failed_tests=$((failed_tests + 1))
+    else
+        if [[ ! -f "$exe1" ]]; then
+            echo "	[FAIL] linking_basic: executable not created"
+            failed_tests=$((failed_tests + 1))
+        else
+            echo "	[PASS] linking_basic"
+        fi
+    fi
+fi
+
+rm -f "$obj1" "$exe1"
+
 if (( failed_tests > 0 )); then
 	echo
 	echo "$failed_tests test(s) failed."
