@@ -17,6 +17,7 @@ first_pass() {
     declare -gA labels
     declare -gA data_label_off
     declare -gA equs
+    declare -gA externals  # For tracking external symbols in object mode
     
     # read lines
     mapfile -t lines_ref <<<"$code_str"

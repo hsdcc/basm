@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 
-source "$(dirname "$0")/../basm.lib.sh"
+source "$(dirname "$0")/../lib/basm.lib.sh"
 
 assert_exit_code() {
 	local test_name="$1"
@@ -68,6 +68,42 @@ assert_output() {
 
 	echo "	[PASS] $test_name"
 	rm -f "$executable"
+	return 0
+}
+
+assert_object_generation() {
+	local test_name="$1"
+	local asm_code="$2"
+
+	echo "	testing $test_name"
+
+	local obj_file
+	obj_file="$(mktemp).o"
+
+	if ! basm_assemble "$asm_code" "$obj_file" "obj"; then
+		echo "	[FAIL] $test_name: object generation failed."
+		rm -f "$obj_file" 
+		return 1
+	fi
+
+	# Check that it's a proper ELF object file
+	if ! [[ -f "$obj_file" ]]; then
+		echo "	[FAIL] $test_name: object file not created."
+		rm -f "$obj_file"
+		return 1
+	fi
+
+	# Check that it's an ELF file
+	local file_type
+	file_type=$(file "$obj_file" 2>/dev/null | grep -c "ELF.*relocatable" || echo "0")
+	if [[ "$file_type" -eq 0 ]]; then
+		echo "	[FAIL] $test_name: not a proper ELF relocatable object file."
+		rm -f "$obj_file"
+		return 1
+	fi
+
+	echo "	[PASS] $test_name"
+	rm -f "$obj_file"
 	return 0
 }
 
@@ -162,7 +198,7 @@ get_expected_exit_code_for_file() {
 }
 
 failed_tests=0
-test_asm_dir="$(dirname "$0")"/asm
+test_asm_dir="$(dirname "$0")/../lib/tests/asm"
 
 # Process all asm files in the test directory
 for asm_file in "$test_asm_dir"/*.asm; do
@@ -221,6 +257,12 @@ for asm_file in "$test_asm_dir"/*.asm; do
 		fi
 	fi
 done
+
+# Test object file generation
+assert_object_generation "object_generation_basic" "section .text
+_start:
+    mov rax, 1
+    ret" || failed_tests=$((failed_tests + 1))
 
 if (( failed_tests > 0 )); then
 	echo
