@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+build_elf_header() {
+    local entry_vaddr="$1"
+    local file_text_off="$2"
+    local text_vaddr="$3"
+    local data_size="$4"
+    local file_data_off="$5"
+
+    # build elf header in hex
+    local header_hex=""
+    header_hex+="7f454c46"
+    header_hex+="02"
+    header_hex+="01"
+    header_hex+="01"
+    header_hex+="00"
+    header_hex+="0000000000000000"
+    header_hex+="0200"
+    header_hex+="3e00"
+    header_hex+="01000000"
+    header_hex+="$(u64le $entry_vaddr)"
+    header_hex+="$(u64le 0x40)"
+    header_hex+="$(u64le 0)"
+    header_hex+="00000000"
+    header_hex+="4000"
+    header_hex+="3800"
+    header_hex+="0100"
+    header_hex+="0000"
+    header_hex+="0000"
+    header_hex+="0000"
+
+    header_hex+="$(u32le 1)"
+    header_hex+="$(u32le 5)"
+    header_hex+="$(u64le $file_text_off)"
+    header_hex+="$(u64le $text_vaddr)"
+    header_hex+="$(u64le $text_vaddr)"
+    local filesz=$((file_data_off + data_size))
+    header_hex+="$(u64le $filesz)"
+    header_hex+="$(u64le $filesz)"
+    header_hex+="$(u64le 0x200000)"
+
+    echo "$header_hex"
+}
