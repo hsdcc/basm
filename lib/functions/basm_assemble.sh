@@ -5,6 +5,17 @@ basm_assemble() {
     local outfile="${2:-a.out}"
     local mode="${3:-exe}"  # exe or obj
 
+    # Apply macro preprocessing first
+    local preprocessed_code
+    if command -v preprocess_macros >/dev/null 2>&1; then
+        preprocessed_code=$(preprocess_macros "$code_str" 2>/dev/null)
+        if [[ $? -eq 0 && -n "$preprocessed_code" ]]; then
+            # Use preprocessed code if successful
+            code_str="$preprocessed_code"
+        fi
+        # If preprocessing failed, continue with original code_str for error reporting
+    fi
+
     # Set global assembly mode
     set_assembly_mode "$mode"
 
