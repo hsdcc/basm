@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Generate proper ELF object file with sections
+# generate proper elf object file with sections
 generate_elf_object_with_sections() {
     local text_hex="$1"
     local data_bytes="$2"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Helper function to reverse byte order in hex string
+# helper function to reverse byte order in hex string
 reverse_endian() {
     local hex="$1"
     local len=${#hex}
@@ -20,7 +20,7 @@ reverse_endian() {
     echo "$reversed"
 }
 
-# Generate proper ELF object file with sections and symbol table
+# generate proper elf object file with sections and symbol table
 generate_elf_object_with_symbols() {
     local text_hex="$1"
     local data_bytes="$2"

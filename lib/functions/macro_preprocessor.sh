@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Simple macro preprocessor for assembly code
+# simple macro preprocessor for assembly code
 preprocess_macros() {
     local input_code="$1"
     local processed_code=""

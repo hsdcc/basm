@@ -107,14 +107,14 @@ assert_object_generation() {
 	return 0
 }
 
-# Function to extract expected value from asm file comment
+# function to extract expected value from asm file comment
 get_expected_from_asm() {
 	local asm_file="$1"
 	local expected=$(grep -E '; expect:' "$asm_file" | head -n 1 | sed 's/.*; expect:[[:space:]]*//' | sed 's/[[:space:]]*$//')
 	echo "$expected"
 }
 
-# Function to get expected output for known files
+# function to get expected output for known files
 get_expected_output_for_file() {
 	local asm_filename="$1"
 	case "$asm_filename" in
@@ -133,7 +133,7 @@ get_expected_output_for_file() {
 	esac
 }
 
-# Function to get expected exit code for known files
+# function to get expected exit code for known files
 get_expected_exit_code_for_file() {
 	local asm_filename="$1"
 	case "$asm_filename" in
@@ -200,7 +200,7 @@ get_expected_exit_code_for_file() {
 failed_tests=0
 test_asm_dir="$(dirname "$0")/../lib/tests/asm"
 
-# Process all asm files in the test directory
+# process all asm files in the test directory
 for asm_file in "$test_asm_dir"/*.asm; do
 	if [ ! -f "$asm_file" ]; then
 		continue	# Skip if no .asm files exist
@@ -258,13 +258,13 @@ for asm_file in "$test_asm_dir"/*.asm; do
 	fi
 done
 
-# Test object file generation
+# test object file generation
 assert_object_generation "object_generation_basic" "section .text
 _start:
     mov rax, 1
     ret" || failed_tests=$((failed_tests + 1))
 
-# Test linking functionality
+# test linking functionality
 echo "	testing linking_basic"
 asm1="section .text
 _start:

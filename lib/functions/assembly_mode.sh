@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Global variable to hold current assembly mode
+# global variable to hold current assembly mode
 declare -g assembly_mode="exe"
 
 set_assembly_mode() {

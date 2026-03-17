@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Robust static linker - combines multiple object files into a single executable with symbol resolution
+# robust static linker - combines multiple object files into a single executable with symbol resolution
 link_objects() {
     local objects=("$@")  # Array of object file paths
     local output_file="${objects[-1]}"  # Last argument is the output file

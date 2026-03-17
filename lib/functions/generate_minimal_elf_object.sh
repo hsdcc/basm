@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Generate proper ELF object file with sections and minimal viable content
+# generate proper elf object file with sections and minimal viable content
 generate_minimal_elf_object() {
     local text_hex="$1"
     local data_bytes="$2"

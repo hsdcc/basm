@@ -39,7 +39,7 @@ parse_immediate() {
     fi
 }
 
-# calculate MOV memory operand size based on addressing mode
+# calculate mov memory operand size based on addressing mode
 # used by both first pass (sizing) and second pass (code generation)
 calc_mem_addr_size() {
     local base="$1"
@@ -72,7 +72,7 @@ calc_mem_addr_size() {
     echo $size
 }
 
-# helper function to calculate MOV instruction size based on addressing mode
+# helper function to calculate mov instruction size based on addressing mode
 calculate_mov_size() {
     arg="${BASH_REMATCH[2]}"
     if [[ "$arg" =~ ^\[(r[a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
