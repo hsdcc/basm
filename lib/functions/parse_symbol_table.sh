@@ -8,68 +8,52 @@ parse_symbol_table() {
     local symtab_size="$3"
     local symtab_ref="$4"
     local -n symtab_n="$4"
-    
-    local fd
-    exec 7< "$file_path"
-    
-    # skip to symbol table
-    for ((i=0; i<symtab_offset; i++)); do
-        read -n1 -u 7 dummy_byte
-    done
-    
-    # each symbol table entry is 24 bytes in elf64
+
+    # read entire symbol table as hex
+    local symtab_hex=""
+    read_file_hex "$file_path" "$symtab_offset" "$symtab_size" "symtab_hex"
+
     symtab_n=()
     local entry_count=$((symtab_size / 24))
-    
-    for ((entry_idx=0; entry_idx<entry_count; entry_idx++)); do
-        # read the symbol table entry (24 bytes)
-        local sym_entry=()
-        for ((j=0; j<24; j++)); do
-            read -n1 -u 7 sym_byte
-            sym_entry+=("$sym_byte")
+
+    for ((entry_idx = 0; entry_idx < entry_count; entry_idx++)); do
+        local offset=$((entry_idx * 48))  # 24 bytes = 48 hex chars
+
+        # st_name: offset 0-3 (4 bytes) - little endian
+        local st_name_hex="${symtab_hex:$offset:8}"
+        local st_name=""
+        for ((i = 6; i >= 0; i -= 2)); do
+            st_name+="${st_name_hex:$i:2}"
         done
-        
-        # extract fields:
-        # st_name: offset 0-3 (4 bytes) - index into string table
-        local st_name=0
-        for ((i=0; i<4; i++)); do
-            local byte_val
-            byte_val=$(printf "%d" "'${sym_entry[$i]}")
-            local shift=$((i * 8))
-            st_name=$((st_name + (byte_val * (2 ** shift))))
+        local st_name_val=$((16#$st_name))
+
+        # st_info: offset 4-5 (1 byte)
+        local st_info_hex="${symtab_hex:$((offset + 8)):2}"
+        local st_info=$((16#$st_info_hex))
+
+        # st_other: offset 6-7 (1 byte)
+        local st_other_hex="${symtab_hex:$((offset + 10)):2}"
+        local st_other=$((16#$st_other_hex))
+
+        # st_shndx: offset 6-7 (2 bytes) - little endian
+        local st_shndx_hex="${symtab_hex:$((offset + 12)):4}"
+        local st_shndx=""
+        for ((i = 2; i >= 0; i -= 2)); do
+            st_shndx+="${st_shndx_hex:$i:2}"
         done
-        
-        # st_info: offset 4 (1 byte) - type and binding info
-        local st_info
-        st_info=$(printf "%d" "'${sym_entry[4]}")
-        
-        # st_shndx: offset 14-15 (2 bytes) - section index
-        local st_shndx_low_byte st_shndx_high_byte
-        st_shndx_low_byte="${sym_entry[14]}"
-        st_shndx_high_byte="${sym_entry[15]}"
-        
-        local st_shndx_low_val st_shndx_high_val
-        st_shndx_low_val=$(printf "%d" "'$st_shndx_low_byte")
-        st_shndx_high_val=$(printf "%d" "'$st_shndx_high_byte")
-        
-        local st_shndx
-        st_shndx=$((st_shndx_low_val + (st_shndx_high_val * 256)))
-        
-        # st_value: offset 8-15 (8 bytes) - symbol value/address
-        local st_value=0
-        for ((i=8; i<16; i++)); do
-            local byte_val
-            byte_val=$(printf "%d" "'${sym_entry[$i]}")
-            local shift=$(((i - 8) * 8))
-            st_value=$((st_value + (byte_val * (2 ** shift))))
+        local st_shndx_val=$((16#$st_shndx))
+
+        # st_value: offset 8-15 (8 bytes) - little endian
+        local st_value_hex="${symtab_hex:$((offset + 16)):16}"
+        local st_value=""
+        for ((i = 14; i >= 0; i -= 2)); do
+            st_value+="${st_value_hex:$i:2}"
         done
-        
-        # store symbol info
-        symtab_n+=("$st_name,$st_info,$st_shndx,$st_value")
+        local st_value_val=$((16#$st_value))
+
+        symtab_n+=("$st_name_val,$st_info,$st_shndx_val,$st_value_val")
     done
-    
-    exec 7<&-
-    
+
     return 0
 }
 
@@ -81,35 +65,29 @@ read_string_table() {
     local strtab_size="$3"
     local strings_ref="$4"
     local -n strings_n="$4"
-    
-    local fd
-    exec 8< "$file_path"
-    
-    # skip to string table
-    for ((i=0; i<strtab_offset; i++)); do
-        read -n1 -u 8 dummy_byte
-    done
-    
-    # read the entire string table
-    local raw_string=""
-    for ((i=0; i<strtab_size; i++)); do
-        read -n1 -u 8 char
-        raw_string+="$char"
-    done
-    
+
+    # read entire string table as hex
+    local strtab_hex=""
+    read_file_hex "$file_path" "$strtab_offset" "$strtab_size" "strtab_hex"
+
     # split by null terminators
     strings_n=()
-    IFS=$'\0' read -ra temp_strings <<< "$raw_string"
-    
-    # copy to named array
-    for str in "${temp_strings[@]}"; do
-        if [[ -n "$str" ]]; then
-            strings_n+=("$str")
+    local current_str=""
+    for ((i = 0; i < ${#strtab_hex}; i += 2)); do
+        local byte_hex="${strtab_hex:$i:2}"
+        if [[ "$byte_hex" == "00" ]]; then
+            if [[ -n "$current_str" ]]; then
+                strings_n+=("$current_str")
+                current_str=""
+            fi
+        else
+            local byte_val=$((16#$byte_hex))
+            if ((byte_val >= 32 && byte_val < 127)); then
+                current_str+=$(printf "\\$(printf '%03o' "$byte_val")")
+            fi
         fi
     done
-    
-    exec 8<&-
-    
+
     return 0
 }
 
@@ -118,9 +96,9 @@ read_string_table() {
 get_elf_symbols() {
     local file_path="$1"
     local symbols_ref="$2"
-    local definitions_ref="$4"  # will store symbols defined in this file
+    local definitions_ref="$3"  # will store symbols defined in this file
     local -n symbols_n="$2"
-    local -n definitions_n="$4"
+    local -n definitions_n="$3"
     
     # initialize associative arrays
     symbols_n=()
@@ -148,23 +126,30 @@ get_elf_symbols() {
     
     local strtable_offset=0 strtable_size=0
     local symtable_offset=0 symtable_size=0
-    
-    # look for .symtab and .strtab sections
+    local symtab_strtab_link=0  # sh_link field of symtab
+
+    # look for .symtab section
     for ((i=0; i<num_sections; i++)); do
         IFS=',' read -r sec_name sec_type sec_offset sec_size <<< "${sections[$i]}"
-        
-        # get section name from section header string table
-        # this would require reading the string table at shstrtab_offset
-        # for simplification, we'll identify sections by their type
-        if [[ $sec_type -eq 2 ]]; then  # sht_symtab
+
+        if [[ $sec_type -eq 2 ]]; then  # SHT_SYMTAB
             symtable_offset=$sec_offset
             symtable_size=$sec_size
-        elif [[ $sec_type -eq 3 ]]; then  # sht_strtab
-            # for now, assume the string table associated with the symbol table
-            # (typically the one linked in the symtab's sh_link field)
-            # for simplicity, we'll assume the last strtab is the right one
+            # read sh_link field (offset 40 in section header entry)
+            # sh_link is at section_header_offset + 40, 4 bytes little endian
+            local shdr_start=$((shoff + i * 64))
+            read_u32le "$file_path" "$((shdr_start + 40))" "symtab_strtab_link"
+            break
+        fi
+    done
+
+    # find the string table section that symtab links to
+    for ((i=0; i<num_sections; i++)); do
+        if [[ $i -eq $symtab_strtab_link ]]; then
+            IFS=',' read -r sec_name sec_type sec_offset sec_size <<< "${sections[$i]}"
             strtable_offset=$sec_offset
             strtable_size=$sec_size
+            break
         fi
     done
     
@@ -177,33 +162,43 @@ get_elf_symbols() {
     local symtab_entries
     parse_symbol_table "$file_path" "$symtable_offset" "$symtable_size" "symtab_entries" || return 1
     
-    # read string table
-    local string_table
-    read_string_table "$file_path" "$strtable_offset" "$strtable_size" "string_table" || return 1
-    
+    # read string table as raw hex (for offset-based lookup)
+    local strtab_hex=""
+    read_file_hex "$file_path" "$strtable_offset" "$strtable_size" "strtab_hex"
+
     # process symbols
     for sym_entry in "${symtab_entries[@]}"; do
         IFS=',' read -r st_name st_info st_shndx st_value <<< "$sym_entry"
-        
+
         # skip null symbol (index 0)
         if [[ $st_name -eq 0 ]]; then
             continue
         fi
-        
-        # get symbol name from string table
-        if [[ $st_name -lt ${#string_table[@]} ]]; then
-            local sym_name="${string_table[$st_name]}"
-            
-            if [[ -n "$sym_name" ]]; then
-                # check if symbol is defined (not undefined/external)
-                # in elf, section index 0 is undefined, >0 means defined in that section
-                if [[ $st_shndx -gt 0 ]]; then
-                    definitions_n["$sym_name"]="$st_value"
-                    symbols_n["$sym_name"]="defined:$st_value"
-                else
-                    # symbol is undefined (external reference)
-                    symbols_n["$sym_name"]="undefined"
-                fi
+
+        # get symbol name by reading string at byte offset in string table
+        local sym_name=""
+        local pos=$((st_name * 2))  # convert byte offset to hex offset
+        while ((pos + 1 < ${#strtab_hex})); do
+            local byte_hex="${strtab_hex:$pos:2}"
+            if [[ "$byte_hex" == "00" ]]; then
+                break
+            fi
+            local byte_val=$((16#$byte_hex))
+            if ((byte_val >= 32 && byte_val < 127)); then
+                sym_name+=$(printf "\\$(printf '%03o' "$byte_val")")
+            fi
+            pos=$((pos + 2))
+        done
+
+        if [[ -n "$sym_name" ]]; then
+            # check if symbol is defined (not undefined/external)
+            # in elf, section index 0 is undefined, >0 means defined in that section
+            if [[ $st_shndx -gt 0 ]]; then
+                definitions_n["$sym_name"]="$st_value"
+                symbols_n["$sym_name"]="defined:$st_value"
+            else
+                # symbol is undefined (external reference)
+                symbols_n["$sym_name"]="undefined"
             fi
         fi
     done

@@ -5,81 +5,29 @@
 parse_elf_header() {
     local file_path="$1"
     local prefix="$2"
-    
+
     # first check if this is actually an elf file
     if ! is_elf_object "$file_path"; then
         return 1
     fi
-    
-    # open file for reading
-    local fd
-    exec 5< "$file_path"
-    
-    # skip to e_shoff (section header table offset) - byte 32-39
-    for ((i=0; i<32; i++)); do
-        read -n1 -u 5 dummy_byte
-    done
-    
-    # read e_shoff (8 bytes) - little endian
-    local shoff_bytes=()
-    for ((i=0; i<8; i++)); do
-        read -n1 -u 5 byte
-        shoff_bytes+=("$byte")
-    done
-    
-    # convert 8-byte little endian to decimal
-    local shoff=0
-    for ((i=0; i<8; i++)); do
-        local byte_val
-        byte_val=$(printf "%d" "'${shoff_bytes[$i]}")
-        local shift=$((i * 8))
-        shoff=$((shoff + (byte_val * (2 ** shift))))
-    done
-    
-    # read e_shnum (number of section headers) - 2 bytes at offset 58-59
-    # seek to position 58
-    exec 5<&-
-    exec 5< "$file_path"
-    for ((i=0; i<58; i++)); do
-        read -n1 -u 5 dummy_byte
-    done
-    
-    # read shnum (2 bytes) - little endian
-    local shnum_low_byte shnum_high_byte
-    read -n1 -u 5 shnum_low_byte
-    read -n1 -u 5 shnum_high_byte
-    
-    local shnum_low_val shnum_high_val
-    shnum_low_val=$(printf "%d" "'$shnum_low_byte")
-    shnum_high_val=$(printf "%d" "'$shnum_high_byte")
-    
+
+    # read e_shoff (bytes 40-47, 8 bytes little endian)
+    local shoff
+    read_u64le "$file_path" 40 "shoff"
+
+    # read e_shnum (bytes 60-61, 2 bytes little endian)
     local num_sections
-    num_sections=$((shnum_low_val + (shnum_high_val * 256)))
-    
-    # read e_shstrndx (section header string table index) - 2 bytes at offset 60-61
-    local shstrndx_low_byte shstrndx_high_byte
-    read -n1 -u 5 shstrndx_low_byte
-    read -n1 -u 5 shstrndx_high_byte
-    
-    local shstrndx_low_val shstrndx_high_val
-    shstrndx_low_val=$(printf "%d" "'$shstrndx_low_byte")
-    shstrndx_high_val=$(printf "%d" "'$shstrndx_high_byte")
-    
+    read_u16le "$file_path" 60 "num_sections"
+
+    # read e_shstrndx (bytes 62-63, 2 bytes little endian)
     local shstrndx
-    shstrndx=$((shstrndx_low_val + (shstrndx_high_val * 256)))
-    
-    # close file descriptor
-    exec 5<&-
-    
+    read_u16le "$file_path" 62 "shstrndx"
+
     # set output variables with the given prefix
-    local shoff_var="${prefix}_shoff"
-    local shnum_var="${prefix}_num_sections"
-    local shstrndx_var="${prefix}_shstrndx"
-    
-    eval "$shoff_var=$shoff"
-    eval "$shnum_var=$num_sections"
-    eval "$shstrndx_var=$shstrndx"
-    
+    eval "${prefix}_shoff=$shoff"
+    eval "${prefix}_num_sections=$num_sections"
+    eval "${prefix}_shstrndx=$shstrndx"
+
     return 0
 }
 
@@ -91,67 +39,29 @@ parse_section_headers() {
     local num_sections="$3"
     local sections_ref="$4"
     local -n sections_n="$4"
-    
-    local fd
-    exec 6< "$file_path"
-    
-    # skip to section header table
-    for ((i=0; i<shoff; i++)); do
-        read -n1 -u 6 dummy_byte
-    done
-    
-    # each section header is 64 bytes in elf64
+
     sections_n=()
-    for ((sec_idx=0; sec_idx<num_sections; sec_idx++)); do
-        # read the section header (64 bytes)
-        local shdr=()
-        for ((j=0; j<64; j++)); do
-            read -n1 -u 6 sec_byte
-            shdr+=("$sec_byte")
-        done
-        
-        # extract fields:
-        # sh_name: offset 0-3 (4 bytes) - index into section header string table
-        local sh_name=0
-        for ((i=0; i<4; i++)); do
-            local byte_val
-            byte_val=$(printf "%d" "'${shdr[$i]}")
-            local shift=$((i * 8))
-            sh_name=$((sh_name + (byte_val * (2 ** shift))))
-        done
-        
-        # sh_type: offset 4-7 (4 bytes)
-        local sh_type=0
-        for ((i=4; i<8; i++)); do
-            local byte_val
-            byte_val=$(printf "%d" "'${shdr[$i]}")
-            local shift=$(((i - 4) * 8))
-            sh_type=$((sh_type + (byte_val * (2 ** shift))))
-        done
-        
-        # sh_offset: offset 24-31 (8 bytes)
-        local sh_offset=0
-        for ((i=24; i<32; i++)); do
-            local byte_val
-            byte_val=$(printf "%d" "'${shdr[$i]}")
-            local shift=$(((i - 24) * 8))
-            sh_offset=$((sh_offset + (byte_val * (2 ** shift))))
-        done
-        
-        # sh_size: offset 32-39 (8 bytes)
-        local sh_size=0
-        for ((i=32; i<40; i++)); do
-            local byte_val
-            byte_val=$(printf "%d" "'${shdr[$i]}")
-            local shift=$(((i - 32) * 8))
-            sh_size=$((sh_size + (byte_val * (2 ** shift))))
-        done
-        
-        # store section info
-        sections_n+=("$sh_name,$sh_type,$sh_offset,$sh_size")
+    for ((sec_idx = 0; sec_idx < num_sections; sec_idx++)); do
+        local offset=$((shoff + sec_idx * 64))
+
+        # sh_name: offset 0-3 (4 bytes) - little endian
+        local sh_name_val
+        read_u32le "$file_path" "$offset" "sh_name_val"
+
+        # sh_type: offset 4-7 (4 bytes) - little endian
+        local sh_type_val
+        read_u32le "$file_path" "$((offset + 4))" "sh_type_val"
+
+        # sh_offset: offset 24-31 (8 bytes) - little endian
+        local sh_off_val
+        read_u64le "$file_path" "$((offset + 24))" "sh_off_val"
+
+        # sh_size: offset 32-39 (8 bytes) - little endian
+        local sh_size_val
+        read_u64le "$file_path" "$((offset + 32))" "sh_size_val"
+
+        sections_n+=("$sh_name_val,$sh_type_val,$sh_off_val,$sh_size_val")
     done
-    
-    exec 6<&-
-    
+
     return 0
 }

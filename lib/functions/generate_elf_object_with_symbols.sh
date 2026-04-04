@@ -44,18 +44,22 @@ generate_elf_object_with_symbols() {
     local text_section_off=$header_size
     local data_section_off=$((text_section_off + text_size))
     
-    # Create symbol string table content
-    local symstrtab_content=$'\0'
+    # Create symbol string table content as hex (bash can't handle null bytes in strings)
+    local symstrtab_hex="00"  # leading null byte
     local current_str_offset=1
-    
+
     # Add all labels to string table
     for label_name in "${!labels_n[@]}"; do
-        symstrtab_content+="$label_name"
-        symstrtab_content+=$'\0'
+        # convert label name to hex
+        for ((ci = 0; ci < ${#label_name}; ci++)); do
+            local ch="${label_name:$ci:1}"
+            symstrtab_hex+=$(printf "%02x" "'$ch")
+        done
+        symstrtab_hex+="00"  # null terminator
         current_str_offset=$((current_str_offset + ${#label_name} + 1))
     done
-    
-    local symstrtab_size=${#symstrtab_content}
+
+    local symstrtab_size=$((${#symstrtab_hex} / 2))
     
     # Each symbol table entry is 24 bytes in ELF64
     # Number of symbol entries = 1 (null entry) + all labels
@@ -64,7 +68,12 @@ generate_elf_object_with_symbols() {
         num_symbols=$((num_symbols + 1))
     done
     local symtab_size=$((num_symbols * 24))
-    
+
+    # Section header string table content (must be defined before section headers)
+    # "\0.text\0.data\0.shstrtab\0.symtab\0.strtab\0"
+    local shstrtab_hex="002e74657874002e64617461002e7368737472746162002e73796d746162002e73747274616200"
+    local shstrtab_size=$((${#shstrtab_hex} / 2))
+
     # Calculate section header table offset (after all content)
     local strtab_off=$((data_section_off + data_size))
     local symtab_off=$((strtab_off + symstrtab_size))
@@ -212,9 +221,11 @@ generate_elf_object_with_symbols() {
     sh_flags_hex=$(printf "%016x" 0)
     section_headers+=$(reverse_endian "$sh_flags_hex")
     section_headers+="0000000000000000"  # sh_addr
-    sh_offset_hex=$(printf "%016x" $strtab_off)  # Points to the section string table after data
+    local shstrtab_actual_off=$((sec_header_table_off + (total_sections * 64)))
+    sh_offset_hex=$(printf "%016x" $shstrtab_actual_off)  # shstrtab is written after section headers
     section_headers+=$(reverse_endian "$sh_offset_hex")
-    sh_size_hex=$(printf "%016x" 34)  # Size of section header string table "\0.text\0.data\0.shstrtab\0.symtab\0.strtab\0" = ~34 chars
+    local shstrtab_size=$((${#shstrtab_hex} / 2))
+    sh_size_hex=$(printf "%016x" $shstrtab_size)
     section_headers+=$(reverse_endian "$sh_size_hex")
     section_headers+="00000000"  # sh_link
     section_headers+="00000000"  # sh_info
@@ -233,8 +244,8 @@ generate_elf_object_with_symbols() {
     section_headers+=$(reverse_endian "$sh_offset_hex")
     sh_size_hex=$(printf "%016x" $symtab_size)  # Size of symbol table
     section_headers+=$(reverse_endian "$sh_size_hex")
-    local link_idx_hex=$(printf "%04x" 5)  # Links to string table (section 5)
-    section_headers+=$(reverse_endian "$link_idx_hex")  # sh_link
+    local link_idx_hex=$(printf "%08x" 5)  # Links to string table (section 5)
+    section_headers+=$(reverse_endian "$link_idx_hex")  # sh_link (4 bytes)
     section_headers+="00000000"  # sh_info - index of first non-local symbol
     sh_addralign_hex=$(printf "%016x" 8)
     section_headers+=$(reverse_endian "$sh_addralign_hex")
@@ -257,11 +268,7 @@ generate_elf_object_with_symbols() {
     sh_addralign_hex=$(printf "%016x" 1)
     section_headers+=$(reverse_endian "$sh_addralign_hex")
     section_headers+="0000000000000000"  # sh_entsize
-    
-    # Section header string table content  
-    # "\0.text\0.data\0.shstrtab\0.symtab\0.strtab\0"
-    local shstrtab_hex="002e74657874002e64617461002e7368737472746162002e73796d746162002e73747274616200"
-    
+
     # Create the file
     local tmpf
     tmpf="$(mktemp)" || { error_msg "failed to create temporary file"; return 1; }
@@ -276,7 +283,7 @@ generate_elf_object_with_symbols() {
     hex_to_bin "$data_bytes" >>"$tmpf"
     
     # Write symbol string table
-    printf "%s" "$symstrtab_content" >>"$tmpf"
+    hex_to_bin "$symstrtab_hex" >>"$tmpf"
     
     # Write symbol table
     hex_to_bin "$symtab_content" >>"$tmpf"

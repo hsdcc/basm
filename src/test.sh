@@ -300,6 +300,171 @@ fi
 
 rm -f "$obj1" "$exe1"
 
+# test linking multiple object files - sections are combined properly
+# note: these tests use objects without cross-references to data sections,
+# since full relocation support is not yet implemented
+echo "	testing linking_multi_object"
+
+# First object: contains _start and exits with code 42
+asm_multi_1="section .text
+    global _start
+_start:
+    mov rax, 60
+    mov rdi, 42
+    syscall"
+
+# Second object: contains separate code (not called, but should be in the binary)
+asm_multi_2="section .text
+    global helper
+helper:
+    mov rax, 99
+    ret"
+
+obj_m1="$(mktemp).o"
+obj_m2="$(mktemp).o"
+exe_multi="$(mktemp)"
+
+if ! basm_assemble "$asm_multi_1" "$obj_m1" "obj"; then
+    echo "	[FAIL] linking_multi_object: failed to create first object file"
+    failed_tests=$((failed_tests + 1))
+elif ! basm_assemble "$asm_multi_2" "$obj_m2" "obj"; then
+    echo "	[FAIL] linking_multi_object: failed to create second object file"
+    failed_tests=$((failed_tests + 1))
+elif ! link_objects "$obj_m1" "$obj_m2" "$exe_multi"; then
+    echo "	[FAIL] linking_multi_object: failed to link objects"
+    failed_tests=$((failed_tests + 1))
+else
+    if [[ ! -f "$exe_multi" ]]; then
+        echo "	[FAIL] linking_multi_object: executable not created"
+        failed_tests=$((failed_tests + 1))
+    else
+        set +e
+        "$exe_multi"
+        actual_exit=$?
+        set -e
+        if (( actual_exit != 42 )); then
+            echo "	[FAIL] linking_multi_object: expected exit code 42, got $actual_exit"
+            failed_tests=$((failed_tests + 1))
+        else
+            # Verify that the combined executable contains code from both objects
+            # by checking the file size is reasonable (text from both objects combined)
+            exe_size=$(wc -c < "$exe_multi")
+            if (( exe_size >= 512 )); then
+                echo "	[PASS] linking_multi_object (exe size: $exe_size bytes)"
+            else
+                echo "	[FAIL] linking_multi_object: executable too small ($exe_size bytes)"
+                failed_tests=$((failed_tests + 1))
+            fi
+        fi
+    fi
+fi
+
+rm -f "$obj_m1" "$obj_m2" "$exe_multi"
+
+# test linking three object files
+echo "	testing linking_three_objects"
+
+asm_3a="section .text
+    global _start
+_start:
+    mov rax, 60
+    mov rdi, 7
+    syscall"
+
+asm_3b="section .text
+    global func_b
+func_b:
+    mov rax, 1
+    ret"
+
+asm_3c="section .text
+    global func_c
+func_c:
+    mov rax, 2
+    ret"
+
+obj_3a="$(mktemp).o"
+obj_3b="$(mktemp).o"
+obj_3c="$(mktemp).o"
+exe_3="$(mktemp)"
+
+if ! basm_assemble "$asm_3a" "$obj_3a" "obj" || \
+   ! basm_assemble "$asm_3b" "$obj_3b" "obj" || \
+   ! basm_assemble "$asm_3c" "$obj_3c" "obj"; then
+    echo "	[FAIL] linking_three_objects: failed to create object files"
+    failed_tests=$((failed_tests + 1))
+elif ! link_objects "$obj_3a" "$obj_3b" "$obj_3c" "$exe_3"; then
+    echo "	[FAIL] linking_three_objects: failed to link objects"
+    failed_tests=$((failed_tests + 1))
+else
+    set +e
+    "$exe_3"
+    exit_code=$?
+    set -e
+    if (( exit_code != 7 )); then
+        echo "	[FAIL] linking_three_objects: expected exit code 7, got $exit_code"
+        failed_tests=$((failed_tests + 1))
+    else
+        echo "	[PASS] linking_three_objects"
+    fi
+fi
+
+rm -f "$obj_3a" "$obj_3b" "$obj_3c" "$exe_3"
+
+# test linking with objects containing data sections (data is combined but not relocated)
+echo "	testing linking_with_data_sections"
+
+asm_data_1="section .text
+    global _start
+_start:
+    mov rax, 60
+    mov rdi, 100
+    syscall
+
+section .data
+msg1: db \"abc\", 0"
+
+asm_data_2="section .text
+    global unused_func
+unused_func:
+    ret
+
+section .data
+msg2: db \"xyz\", 0"
+
+obj_d1="$(mktemp).o"
+obj_d2="$(mktemp).o"
+exe_data="$(mktemp)"
+
+if ! basm_assemble "$asm_data_1" "$obj_d1" "obj" || \
+   ! basm_assemble "$asm_data_2" "$obj_d2" "obj"; then
+    echo "	[FAIL] linking_with_data_sections: failed to create object files"
+    failed_tests=$((failed_tests + 1))
+elif ! link_objects "$obj_d1" "$obj_d2" "$exe_data"; then
+    echo "	[FAIL] linking_with_data_sections: failed to link objects"
+    failed_tests=$((failed_tests + 1))
+else
+    set +e
+    "$exe_data"
+    actual_exit=$?
+    set -e
+    if (( actual_exit != 100 )); then
+        echo "	[FAIL] linking_with_data_sections: expected exit code 100, got $actual_exit"
+        failed_tests=$((failed_tests + 1))
+    else
+        # Verify data sections were combined
+        data_size=$(wc -c < "$exe_data")
+        if (( data_size > 512 )); then
+            echo "	[PASS] linking_with_data_sections (exe size: $data_size bytes)"
+        else
+            echo "	[FAIL] linking_with_data_sections: executable too small ($data_size bytes)"
+            failed_tests=$((failed_tests + 1))
+        fi
+    fi
+fi
+
+rm -f "$obj_d1" "$obj_d2" "$exe_data"
+
 if (( failed_tests > 0 )); then
 	echo
 	echo "$failed_tests test(s) failed."
