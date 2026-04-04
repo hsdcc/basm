@@ -440,6 +440,50 @@ fi
 
 rm -f "$obj_rel" "$exe_rel"
 
+echo "	testing linking_multi_relocations"
+
+asm_mr_1="section .text
+    global _start
+_start:
+    mov rax, 1
+    mov rdi, 1
+    mov rsi, msg1
+    mov rdx, 3
+    syscall
+    mov rax, 60
+    xor rdi, rdi
+    syscall
+
+section .data
+msg1: db \"abc\", 0"
+
+obj_mr1="$(mktemp).o"
+exe_mr="$(mktemp)"
+
+if ! basm_assemble "$asm_mr_1" "$obj_mr1" "obj"; then
+    echo "	[FAIL] linking_multi_relocations: failed to create object file"
+    failed_tests=$((failed_tests + 1))
+elif ! link_objects "$obj_mr1" "$exe_mr"; then
+    echo "	[FAIL] linking_multi_relocations: failed to link object"
+    failed_tests=$((failed_tests + 1))
+else
+    set +e
+    output="$("$exe_mr" 2>&1)"
+    actual_exit=$?
+    set -e
+    if [[ "$output" != "abc" ]]; then
+        echo "	[FAIL] linking_multi_relocations: unexpected output '$output'"
+        failed_tests=$((failed_tests + 1))
+    elif (( actual_exit != 0 )); then
+        echo "	[FAIL] linking_multi_relocations: expected exit code 0, got $actual_exit"
+        failed_tests=$((failed_tests + 1))
+    else
+        echo "	[PASS] linking_multi_relocations"
+    fi
+fi
+
+rm -f "$obj_mr1" "$exe_mr"
+
 if (( failed_tests > 0 )); then
 	echo
 	echo "$failed_tests test(s) failed."
