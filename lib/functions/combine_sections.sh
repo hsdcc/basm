@@ -14,12 +14,12 @@ extract_section_by_name() {
     shoff="${extract_shoff}"
     num_sections="${extract_num_sections}"
     shstrndx="${extract_shstrndx}"
-    local sections
-    parse_section_headers "$file_path" "$shoff" "$num_sections" "sections" || return 1
+    local _cs_sections
+    parse_section_headers "$file_path" "$shoff" "$num_sections" "_cs_sections" || return 1
     local shstrtab_offset=0
     local shstrtab_size=0
     for ((i = 0; i < num_sections; i++)); do
-        IFS=',' read -r sec_name sec_type sec_off sec_size <<< "${sections[$i]}"
+        IFS=',' read -r sec_name sec_type sec_off sec_size <<< "${_cs_sections[$i]}"
         if [[ $i -eq $shstrndx ]]; then
             shstrtab_offset=$sec_off
             shstrtab_size=$sec_size
@@ -43,7 +43,7 @@ extract_section_by_name() {
         _rb_str_result="$result"
     }
     for ((i = 0; i < num_sections; i++)); do
-        IFS=',' read -r sec_name sec_type sec_off sec_size <<< "${sections[$i]}"
+        IFS=',' read -r sec_name sec_type sec_off sec_size <<< "${_cs_sections[$i]}"
         local actual_name=""
         _rb_get_string "$shstrtab_hex" "$((sec_name * 2))"
         actual_name="$_rb_str_result"

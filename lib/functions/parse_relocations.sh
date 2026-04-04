@@ -13,12 +13,12 @@ parse_relocations() {
     shoff="${pr_shoff}"
     num_sections="${pr_num_sections}"
     shstrndx="${pr_shstrndx}"
-    local sections
-    parse_section_headers "$file_path" "$shoff" "$num_sections" "sections" || return 1
+    local _pr_sections
+    parse_section_headers "$file_path" "$shoff" "$num_sections" "_pr_sections" || return 1
     local shstrtab_offset=0
     local shstrtab_size=0
     for ((i = 0; i < num_sections; i++)); do
-        IFS=',' read -r sec_name sec_type sec_off sec_size <<< "${sections[$i]}"
+        IFS=',' read -r sec_name sec_type sec_off sec_size <<< "${_pr_sections[$i]}"
         if [[ $i -eq $shstrndx ]]; then
             shstrtab_offset=$sec_off
             shstrtab_size=$sec_size
@@ -46,7 +46,7 @@ parse_relocations() {
     local rela_off=0 rela_size=0
     local symtab_idx=0
     for ((i = 0; i < num_sections; i++)); do
-        IFS=',' read -r sec_name sec_type sec_off sec_size <<< "${sections[$i]}"
+        IFS=',' read -r sec_name sec_type sec_off sec_size <<< "${_pr_sections[$i]}"
         if [[ $sec_type -eq 2 ]]; then
             symtab_off=$sec_off
             symtab_size=$sec_size

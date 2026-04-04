@@ -141,6 +141,9 @@ second_pass() {
                     elif [[ -n "${labels[$arg]:-}" ]]; then
                         addr=$((text_vaddr + labels[$arg]))
                         relocations+=("$((current_address + 2)):${arg}:1:0")
+                    elif [[ -n "${externals[$arg]:-}" ]]; then
+                        addr=0
+                        relocations+=("$((current_address + 2)):${arg}:1:0")
                     else
                         echo "error at line $line_number: unknown label '$arg' in mov instruction '$line'" >&2
                         return 1

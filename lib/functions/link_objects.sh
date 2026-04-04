@@ -103,7 +103,37 @@ link_objects() {
         for reloc_entry in "${relocs[@]}"; do
             IFS=':' read -r r_offset sym_name r_type r_addend <<< "$reloc_entry"
             local sym_final_addr=0
-            if [[ -n "${data_label_off[$sym_name]:-}" ]]; then
+            if [[ -n "${resolved_symbols[$sym_name]:-}" ]]; then
+                local res="${resolved_symbols[$sym_name]}"
+                IFS=':' read -r res_shndx res_off <<< "$res"
+                if [[ $res_shndx -eq 1 ]]; then
+                    local cum=0
+                    for ((oi=0; oi<${#objects[@]}; oi++)); do
+                        local ot=""
+                        extract_section_by_name "${objects[$oi]}" ".text" "ot"
+                        local ots=$((${#ot} / 2))
+                        if ((cum + ots > res_off)); then
+                            res_off=$((res_off - cum))
+                            break
+                        fi
+                        cum=$((cum + ots))
+                    done
+                    sym_final_addr=$((text_vaddr + res_off))
+                elif [[ $res_shndx -eq 2 ]]; then
+                    local cum=0
+                    for ((oi=0; oi<${#objects[@]}; oi++)); do
+                        local od=""
+                        extract_section_by_name "${objects[$oi]}" ".data" "od"
+                        local ods=$((${#od} / 2))
+                        if ((cum + ods > res_off)); then
+                            res_off=$((res_off - cum))
+                            break
+                        fi
+                        cum=$((cum + ods))
+                    done
+                    sym_final_addr=$((data_vaddr + res_off))
+                fi
+            elif [[ -n "${data_label_off[$sym_name]:-}" ]]; then
                 sym_final_addr=$((data_vaddr + data_offsets[obj_idx] + data_label_off[$sym_name] + r_addend))
             elif [[ -n "${labels[$sym_name]:-}" ]]; then
                 sym_final_addr=$((text_vaddr + text_offsets[obj_idx] + labels[$sym_name] + r_addend))

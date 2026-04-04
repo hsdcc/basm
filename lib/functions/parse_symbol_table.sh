@@ -79,13 +79,13 @@ get_elf_symbols() {
     shoff="${current_shoff}"
     num_sections="${current_num_sections}"
     shstrndx="${current_shstrndx}"
-    local sections
-    parse_section_headers "$file_path" "$shoff" "$num_sections" "sections" || return 1
+    local _ges_sections
+    parse_section_headers "$file_path" "$shoff" "$num_sections" "_ges_sections" || return 1
     local strtable_offset=0 strtable_size=0
     local symtable_offset=0 symtable_size=0
     local symtab_strtab_link=0
     for ((i=0; i<num_sections; i++)); do
-        IFS=',' read -r sec_name sec_type sec_offset sec_size <<< "${sections[$i]}"
+        IFS=',' read -r sec_name sec_type sec_offset sec_size <<< "${_ges_sections[$i]}"
         if [[ $sec_type -eq 2 ]]; then
             symtable_offset=$sec_offset
             symtable_size=$sec_size
@@ -96,7 +96,7 @@ get_elf_symbols() {
     done
     for ((i=0; i<num_sections; i++)); do
         if [[ $i -eq $symtab_strtab_link ]]; then
-            IFS=',' read -r sec_name sec_type sec_offset sec_size <<< "${sections[$i]}"
+            IFS=',' read -r sec_name sec_type sec_offset sec_size <<< "${_ges_sections[$i]}"
             strtable_offset=$sec_offset
             strtable_size=$sec_size
             break
@@ -123,8 +123,8 @@ get_elf_symbols() {
         done
         if [[ -n "$sym_name" ]]; then
             if [[ $st_shndx -gt 0 ]]; then
-                definitions_n["$sym_name"]="$st_value"
-                symbols_n["$sym_name"]="defined:$st_value"
+                definitions_n["$sym_name"]="$st_shndx:$st_value"
+                symbols_n["$sym_name"]="defined:$st_shndx:$st_value"
             else
                 symbols_n["$sym_name"]="undefined"
             fi

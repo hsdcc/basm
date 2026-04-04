@@ -8,6 +8,7 @@ resolve_symbols() {
     local -n objects_n="$1"
     local -n resolved_n="$2"
     local -n unresolved_n="$3"
+    unset all_symbols defined_symbols 2>/dev/null
     declare -gA all_symbols=()
     declare -gA defined_symbols=()
     for obj_file in "${objects_n[@]}"; do

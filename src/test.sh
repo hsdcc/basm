@@ -484,6 +484,49 @@ fi
 
 rm -f "$obj_mr1" "$exe_mr"
 
+echo "	testing linking_extern"
+
+asm_ext_1="section .text
+    global _start
+    extern ext_sym
+_start:
+    mov rax, ext_sym
+    mov rdi, rax
+    mov rax, 60
+    syscall"
+
+asm_ext_2="section .text
+    global ext_sym
+ext_sym:
+    mov rax, 77
+    ret"
+
+obj_ext1="$(mktemp).o"
+obj_ext2="$(mktemp).o"
+exe_ext="$(mktemp)"
+
+if ! basm_assemble "$asm_ext_1" "$obj_ext1" "obj" || \
+   ! basm_assemble "$asm_ext_2" "$obj_ext2" "obj"; then
+    echo "	[FAIL] linking_extern: failed to create object files"
+    failed_tests=$((failed_tests + 1))
+elif ! link_objects "$obj_ext1" "$obj_ext2" "$exe_ext"; then
+    echo "	[FAIL] linking_extern: failed to link objects"
+    failed_tests=$((failed_tests + 1))
+else
+    set +e
+    "$exe_ext"
+    actual_exit=$?
+    set -e
+    if (( actual_exit == 139 )); then
+        echo "	[FAIL] linking_extern: segfault (relocation not patched)"
+        failed_tests=$((failed_tests + 1))
+    else
+        echo "	[PASS] linking_extern (exit code: $actual_exit)"
+    fi
+fi
+
+rm -f "$obj_ext1" "$obj_ext2" "$exe_ext"
+
 if (( failed_tests > 0 )); then
 	echo
 	echo "$failed_tests test(s) failed."

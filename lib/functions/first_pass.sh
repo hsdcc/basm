@@ -16,12 +16,13 @@ first_pass() {
     line_number=0
     
     
-    declare -gA labels
-    declare -gA data_label_off
-    declare -gA rodata_label_off
-    declare -gA bss_label_off
-    declare -gA equs
-    declare -gA externals
+    unset labels data_label_off rodata_label_off bss_label_off equs externals relocations 2>/dev/null
+    declare -gA labels=()
+    declare -gA data_label_off=()
+    declare -gA rodata_label_off=()
+    declare -gA bss_label_off=()
+    declare -gA equs=()
+    declare -gA externals=()
     declare -ga relocations=()  
     
     
@@ -56,6 +57,15 @@ first_pass() {
             continue
             ;;
         global\ *) continue ;;
+        extern\ *)
+            local ext_list="${line#extern }"
+            IFS=',' read -ra ext_syms <<< "$ext_list"
+            for ext_sym in "${ext_syms[@]}"; do
+                ext_sym=$(trim_string "$ext_sym")
+                [[ -n "$ext_sym" ]] && externals["$ext_sym"]=1
+            done
+            continue
+            ;;
         esac
         if [[ "$in_section" == "data" ]]; then
             if [[ "$line" =~ $equ_pattern ]]; then

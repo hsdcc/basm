@@ -20,10 +20,12 @@ generate_elf_object_with_symbols() {
     local outfile="$5"
     local data_labels_ref="$6"
     local relocations_ref="$7"
+    local externals_ref="$8"
     local -n labels_n="$3"
     local -n equs_n="$4"
     local -n data_labels_n="$6"
     local -n relocations_n="$7"
+    local -n externals_n="$8"
     local text_size=$((${#text_hex} / 2))
     local data_size=$((${#data_bytes} / 2))
     local total_sections=7
@@ -55,12 +57,23 @@ generate_elf_object_with_symbols() {
         symstrtab_hex+="00"
         current_str_offset=$((current_str_offset + ${#label_name} + 1))
     done
+    for ext_name in "${!externals_n[@]}"; do
+        for ((ci = 0; ci < ${#ext_name}; ci++)); do
+            local ch="${ext_name:$ci:1}"
+            symstrtab_hex+=$(printf "%02x" "'$ch")
+        done
+        symstrtab_hex+="00"
+        current_str_offset=$((current_str_offset + ${#ext_name} + 1))
+    done
     local symstrtab_size=$((${#symstrtab_hex} / 2))
     local num_symbols=1
     for label_name in "${!labels_n[@]}"; do
         num_symbols=$((num_symbols + 1))
     done
     for label_name in "${!data_labels_n[@]}"; do
+        num_symbols=$((num_symbols + 1))
+    done
+    for ext_name in "${!externals_n[@]}"; do
         num_symbols=$((num_symbols + 1))
     done
     local symtab_size=$((num_symbols * 24))
@@ -150,6 +163,28 @@ generate_elf_object_with_symbols() {
         symtab_content+=$(reverse_endian "$shndx_hex")
         local value_hex=$(printf "%016x" $label_off)
         symtab_content+=$(reverse_endian "$value_hex")
+        symtab_content+="0000000000000000"
+        sym_idx=$((sym_idx + 1))
+    done
+    for ext_name in "${!externals_n[@]}"; do
+        local str_offset=1
+        for temp_label in "${!labels_n[@]}"; do
+            str_offset=$((str_offset + ${#temp_label} + 1))
+        done
+        for temp_label in "${!data_labels_n[@]}"; do
+            str_offset=$((str_offset + ${#temp_label} + 1))
+        done
+        for temp_label in "${!externals_n[@]}"; do
+            [[ "$temp_label" == "$ext_name" ]] && break
+            str_offset=$((str_offset + ${#temp_label} + 1))
+        done
+        local st_name_hex=$(printf "%08x" $str_offset)
+        symtab_content+=$(reverse_endian "$st_name_hex")
+        symtab_content+="10"
+        symtab_content+="00"
+        local shndx_hex=$(printf "%04x" 0)
+        symtab_content+=$(reverse_endian "$shndx_hex")
+        symtab_content+="0000000000000000"
         symtab_content+="0000000000000000"
         sym_idx=$((sym_idx + 1))
     done
