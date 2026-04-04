@@ -21,7 +21,8 @@ first_pass() {
     declare -gA rodata_label_off
     declare -gA bss_label_off
     declare -gA equs
-    declare -gA externals  
+    declare -gA externals
+    declare -ga relocations=()  
     
     
     mapfile -t lines_ref <<<"$code_str"

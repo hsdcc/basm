@@ -45,7 +45,7 @@ basm_assemble() {
         return 1
     fi
     if [[ "$mode" == "obj" ]]; then
-        generate_elf_object_with_symbols "$text_hex" "$data_bytes" "labels" "equs" "$outfile"
+        generate_elf_object_with_symbols "$text_hex" "$data_bytes" "labels" "equs" "$outfile" "data_label_off" "relocations"
     else
         local header_hex
         header_hex=$(build_elf_header $entry_vaddr $file_text_off $text_vaddr $data_size $file_data_off)

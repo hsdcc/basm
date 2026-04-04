@@ -18,17 +18,36 @@ generate_elf_object_with_symbols() {
     local labels_ref="$3"
     local equs_ref="$4"
     local outfile="$5"
+    local data_labels_ref="$6"
+    local relocations_ref="$7"
     local -n labels_n="$3"
     local -n equs_n="$4"
+    local -n data_labels_n="$6"
+    local -n relocations_n="$7"
     local text_size=$((${#text_hex} / 2))
     local data_size=$((${#data_bytes} / 2))
-    local total_sections=6
+    local total_sections=7
     local header_size=64
     local text_section_off=$header_size
     local data_section_off=$((text_section_off + text_size))
+    local rela_hex=""
+    if [[ ${#relocations_n[@]} -gt 0 ]]; then
+        generate_relocation_section "relocations_n" "labels_n" "data_labels_n" "rela_hex"
+    fi
+    local rela_size=$((${#rela_hex} / 2))
+    local total_sections=6
+    [[ $rela_size -gt 0 ]] && total_sections=7
     local symstrtab_hex="00"
     local current_str_offset=1
     for label_name in "${!labels_n[@]}"; do
+        for ((ci = 0; ci < ${#label_name}; ci++)); do
+            local ch="${label_name:$ci:1}"
+            symstrtab_hex+=$(printf "%02x" "'$ch")
+        done
+        symstrtab_hex+="00"
+        current_str_offset=$((current_str_offset + ${#label_name} + 1))
+    done
+    for label_name in "${!data_labels_n[@]}"; do
         for ((ci = 0; ci < ${#label_name}; ci++)); do
             local ch="${label_name:$ci:1}"
             symstrtab_hex+=$(printf "%02x" "'$ch")
@@ -41,12 +60,16 @@ generate_elf_object_with_symbols() {
     for label_name in "${!labels_n[@]}"; do
         num_symbols=$((num_symbols + 1))
     done
+    for label_name in "${!data_labels_n[@]}"; do
+        num_symbols=$((num_symbols + 1))
+    done
     local symtab_size=$((num_symbols * 24))
     local shstrtab_hex="002e74657874002e64617461002e7368737472746162002e73796d746162002e73747274616200"
     local shstrtab_size=$((${#shstrtab_hex} / 2))
     local strtab_off=$((data_section_off + data_size))
     local symtab_off=$((strtab_off + symstrtab_size))
-    local sec_header_table_off=$((symtab_off + symtab_size))
+    local rela_off=$((symtab_off + symtab_size))
+    local sec_header_table_off=$((rela_off + rela_size))
     local elf_header=""
     elf_header+="7f454c46"
     elf_header+="02"
@@ -87,11 +110,43 @@ generate_elf_object_with_symbols() {
             temp_str+=$'\0'
             str_offset=$((str_offset + ${#temp_label} + 1))
         done
+        for temp_label in "${!data_labels_n[@]}"; do
+            temp_str+="$temp_label"
+            temp_str+=$'\0'
+            str_offset=$((str_offset + ${#temp_label} + 1))
+        done
         local st_name_hex=$(printf "%08x" $str_offset)
         symtab_content+=$(reverse_endian "$st_name_hex")
         symtab_content+="10"
         symtab_content+="00"
         local shndx_hex=$(printf "%04x" 1)
+        symtab_content+=$(reverse_endian "$shndx_hex")
+        local value_hex=$(printf "%016x" $label_off)
+        symtab_content+=$(reverse_endian "$value_hex")
+        symtab_content+="0000000000000000"
+        sym_idx=$((sym_idx + 1))
+    done
+    for label_name in "${!data_labels_n[@]}"; do
+        local label_off=${data_labels_n[$label_name]}
+        local str_offset=1
+        local temp_str=$'\0'
+        local found=0
+        for temp_label in "${!labels_n[@]}"; do
+            temp_str+="$temp_label"
+            temp_str+=$'\0'
+            str_offset=$((str_offset + ${#temp_label} + 1))
+        done
+        for temp_label in "${!data_labels_n[@]}"; do
+            [[ "$temp_label" == "$label_name" ]] && { found=1; break; }
+            temp_str+="$temp_label"
+            temp_str+=$'\0'
+            str_offset=$((str_offset + ${#temp_label} + 1))
+        done
+        local st_name_hex=$(printf "%08x" $str_offset)
+        symtab_content+=$(reverse_endian "$st_name_hex")
+        symtab_content+="10"
+        symtab_content+="00"
+        local shndx_hex=$(printf "%04x" 2)
         symtab_content+=$(reverse_endian "$shndx_hex")
         local value_hex=$(printf "%016x" $label_off)
         symtab_content+=$(reverse_endian "$value_hex")
@@ -180,6 +235,26 @@ generate_elf_object_with_symbols() {
     sh_addralign_hex=$(printf "%016x" 1)
     section_headers+=$(reverse_endian "$sh_addralign_hex")
     section_headers+="0000000000000000"
+    if [[ $rela_size -gt 0 ]]; then
+        sh_name_hex=$(printf "%08x" 39)
+        section_headers+=$(reverse_endian "$sh_name_hex")
+        section_headers+="04000000"
+        sh_flags_hex=$(printf "%016x" 0)
+        section_headers+=$(reverse_endian "$sh_flags_hex")
+        section_headers+="0000000000000000"
+        sh_offset_hex=$(printf "%016x" $rela_off)
+        section_headers+=$(reverse_endian "$sh_offset_hex")
+        sh_size_hex=$(printf "%016x" $rela_size)
+        section_headers+=$(reverse_endian "$sh_size_hex")
+        local rela_link_hex=$(printf "%08x" 4)
+        section_headers+=$(reverse_endian "$rela_link_hex")
+        local rela_info_hex=$(printf "%08x" 1)
+        section_headers+=$(reverse_endian "$rela_info_hex")
+        sh_addralign_hex=$(printf "%016x" 8)
+        section_headers+=$(reverse_endian "$sh_addralign_hex")
+        local rela_entsize_hex=$(printf "%016x" 24)
+        section_headers+=$(reverse_endian "$rela_entsize_hex")
+    fi
     local tmpf
     tmpf="$(mktemp)" || { error_msg "failed to create temporary file"; return 1; }
     hex_to_bin "$elf_header" >"$tmpf"
@@ -187,6 +262,7 @@ generate_elf_object_with_symbols() {
     hex_to_bin "$data_bytes" >>"$tmpf"
     hex_to_bin "$symstrtab_hex" >>"$tmpf"
     hex_to_bin "$symtab_content" >>"$tmpf"
+    [[ $rela_size -gt 0 ]] && hex_to_bin "$rela_hex" >>"$tmpf"
     hex_to_bin "$section_headers" >>"$tmpf"
     hex_to_bin "$shstrtab_hex" >>"$tmpf"
     chmod 644 "$tmpf"

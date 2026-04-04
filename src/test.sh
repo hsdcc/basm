@@ -395,6 +395,51 @@ else
     fi
 fi
 rm -f "$obj_d1" "$obj_d2" "$exe_data"
+
+echo "	testing linking_with_relocations"
+
+asm_rel_1="section .text
+    global _start
+_start:
+    mov rax, 1
+    mov rdi, 1
+    mov rsi, msg
+    mov rdx, 5
+    syscall
+    mov rax, 60
+    xor rdi, rdi
+    syscall
+
+section .data
+msg: db \"hello\", 0"
+
+obj_rel="$(mktemp).o"
+exe_rel="$(mktemp)"
+
+if ! basm_assemble "$asm_rel_1" "$obj_rel" "obj"; then
+    echo "	[FAIL] linking_with_relocations: failed to create object file"
+    failed_tests=$((failed_tests + 1))
+elif ! link_objects "$obj_rel" "$exe_rel"; then
+    echo "	[FAIL] linking_with_relocations: failed to link object"
+    failed_tests=$((failed_tests + 1))
+else
+    set +e
+    output="$("$exe_rel" 2>&1)"
+    actual_exit=$?
+    set -e
+    if [[ "$output" != "hello" ]]; then
+        echo "	[FAIL] linking_with_relocations: unexpected output '$output'"
+        failed_tests=$((failed_tests + 1))
+    elif (( actual_exit != 0 )); then
+        echo "	[FAIL] linking_with_relocations: expected exit code 0, got $actual_exit"
+        failed_tests=$((failed_tests + 1))
+    else
+        echo "	[PASS] linking_with_relocations"
+    fi
+fi
+
+rm -f "$obj_rel" "$exe_rel"
+
 if (( failed_tests > 0 )); then
 	echo
 	echo "$failed_tests test(s) failed."
