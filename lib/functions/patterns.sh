@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-
-# regex patterns
 equ_pattern='^([A-Za-z0-9_]+)[[:space:]]+equ[[:space:]]+\$[[:space:]]*-[[:space:]]*([A-Za-z0-9_]+)[[:space:]]*$'
 db_pattern='^([a-zA-Z0-9_]+):?[[:space:]]+db[[:space:]]+\"(.*)\"([[:space:]]*,[[:space:]]*([0-9]+))?[[:space:]]*$'
 dq_pattern='^([a-zA-Z0-9_]+):?[[:space:]]+dq[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$'
@@ -28,8 +26,6 @@ movzx_pattern='^(movzx|movsx)[[:space:]]+(r[a-z]{2}),[[:space:]]+([ab][lh]|[cd][
 movsxd_pattern='^movsxd[[:space:]]+(r[a-z]{2}),[[:space:]]+([er][a-z]{2})$'
 setcc_pattern='^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$'
 cmov_pattern='^cmov(e|ne|a|ae|b|be|g|ge|l|le|o|no|s|ns|p|np)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$'
-
-# floating point patterns
 movss_rr_pattern='^movss[[:space:]]+(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
 movsd_rr_pattern='^movsd[[:space:]]+(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'
 addss_rr_pattern='^addss[[:space:]]+(xmm[0-9]+),[[:space:]]+(xmm[0-9]+)$'

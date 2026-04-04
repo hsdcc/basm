@@ -6,8 +6,6 @@ build_elf_header() {
     local text_vaddr="$3"
     local data_size="$4"
     local file_data_off="$5"
-
-    # build elf header in hex
     local header_hex=""
     header_hex+="7f454c46"
     header_hex+="02"
@@ -28,7 +26,6 @@ build_elf_header() {
     header_hex+="0000"
     header_hex+="0000"
     header_hex+="0000"
-
     header_hex+="$(u32le 1)"
     header_hex+="$(u32le 5)"
     header_hex+="$(u64le $file_text_off)"
@@ -38,6 +35,5 @@ build_elf_header() {
     header_hex+="$(u64le $filesz)"
     header_hex+="$(u64le $filesz)"
     header_hex+="$(u64le 0x200000)"
-
     echo "$header_hex"
 }

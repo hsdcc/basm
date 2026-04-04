@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-
-# helper to get register number for byte registers too
 get_reg_num() {
     local reg="$1"
     case "$reg" in
@@ -19,13 +17,10 @@ get_reg_num() {
         *) echo -1 ;;
     esac
 }
-
-# helper functions for assembling
 build_mod_rm() {
     local mod=$1 reg=$2 rm=$3
     echo $((mod * 64 + reg * 8 + rm))
 }
-
 parse_immediate() {
     local arg=$1
     if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
@@ -38,9 +33,6 @@ parse_immediate() {
         error_msg "unknown immediate '$arg'"
     fi
 }
-
-# calculate mov memory operand size based on addressing mode
-# used by both first pass (sizing) and second pass (code generation)
 calc_mem_addr_size() {
     local base="$1"
     local disp="$2"
@@ -71,8 +63,6 @@ calc_mem_addr_size() {
     fi
     echo $size
 }
-
-# helper function to calculate mov instruction size based on addressing mode
 calculate_mov_size() {
     arg="${BASH_REMATCH[2]}"
     if [[ "$arg" =~ ^\[(r[a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
@@ -102,8 +92,6 @@ calculate_mov_size() {
         text_bytes_len=$((text_bytes_len + 10))
     fi
 }
-
-# helper function to calculate arithmetic reg,imm size based on register and value
 calculate_arith_ri_size() {
     reg="${BASH_REMATCH[2]}"
     arg="${BASH_REMATCH[3]}"
@@ -117,8 +105,6 @@ calculate_arith_ri_size() {
         text_bytes_len=$((text_bytes_len + 4))
     fi
 }
-
-# helper function to calculate simple instruction size
 calculate_simple_instr_size() {
     case "$line" in
         syscall) text_bytes_len=$((text_bytes_len + 2)) ;;
@@ -129,8 +115,6 @@ calculate_simple_instr_size() {
         cdqe) text_bytes_len=$((text_bytes_len + 2)) ;;
     esac
 }
-
-# helper function to handle floating point operations
 handle_fp_operation() {
     local op_name="$1"
     local size="$2"
@@ -140,18 +124,16 @@ handle_fp_operation() {
     text_hex+="${fp_opcodes["$op_name"]}$(printf "%02x" $mod_rm)"
     current_address=$((current_address + size))
 }
-
 append_instruction() {
     local hex=$1 size=$2
     text_hex+=$hex
     ((current_address += size))
 }
-
 parse_operands() {
     local line=$1
-    # simple split by space, assume max 3 operands
+    
     IFS=' ' read -r mnemonic op1 op2 op3 <<< "$line"
-    # trim
+    
     mnemonic=$(trim_string "$mnemonic")
     op1=$(trim_string "$op1")
     op2=$(trim_string "$op2")

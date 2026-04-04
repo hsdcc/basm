@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-
-# assembler functions
 assemble_simple() {
     local op=$1
     case "$op" in
@@ -13,14 +11,12 @@ assemble_simple() {
         *) error_msg "unknown simple op '$op'" ;;
     esac
 }
-
 assemble_xor_self() {
     local reg=$1
     local mod_rm=$(build_mod_rm 3 ${regs[$reg]} ${regs[$reg]})
     local hex=$(printf "4831%02x" $mod_rm)
     append_instruction "$hex" 3
 }
-
 assemble_push_pop() {
     local op=$1 reg=$2
     local opcode
@@ -32,24 +28,22 @@ assemble_push_pop() {
     local hex=$(printf "%02x" $opcode)
     append_instruction "$hex" 1
 }
-
 assemble_arith_rr() {
     local op=$1 dst=$2 src=$3
     local mod_rm=$(build_mod_rm 3 ${regs[$src]} ${regs[$dst]})
     local hex=$(printf "${arith_opcodes[$op]}" $mod_rm)
     append_instruction "$hex" 3
 }
-
 assemble_mov() {
     local operands="$1"
     if output=$(parse_rr_operands "$operands"); then
         read dst src <<< "$output"
-        # mov reg, reg
+        
         local mod_rm=$(build_mod_rm 3 ${regs[$src]} ${regs[$dst]})
         text_hex+=$(printf "4889%02x" $mod_rm)
         current_address=$((current_address + 3))
     elif [[ "$operands" =~ $mem_dest_operands ]]; then
-        # mov [mem], reg
+        
         local mem_op="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
         local reg="${BASH_REMATCH[3]}"
         hex_code=$(assemble_mem_operand "$mem_op" "${regs[$reg]}" "4889")
@@ -57,12 +51,12 @@ assemble_mov() {
         current_address=$((current_address + ${#hex_code}/2))
     elif output=$(parse_mem_operands "$operands"); then
         read reg mem <<< "$output"
-        # mov reg, [mem]
+        
         hex_code=$(assemble_mem_operand "$mem" "${regs[$reg]}" "488b")
         text_hex+=$hex_code
         current_address=$((current_address + ${#hex_code}/2))
     else
-        # mov reg, imm
+        
         if output=$(parse_ri_operands "$operands"); then
             read reg arg <<< "$output"
             local val_is_immediate=0
@@ -114,7 +108,6 @@ assemble_mov() {
         fi
     fi
 }
-
 assemble_arith() {
     local mnemonic="$1"
     local operands="$2"
@@ -138,7 +131,7 @@ assemble_arith() {
         text_hex+=$hex_code
         current_address=$((current_address + ${#hex_code}/2))
     elif [[ "$operands" =~ $mem_dest_operands ]]; then
-        # op [mem], reg
+        
         local mem_op="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
         local reg="${BASH_REMATCH[3]}"
         local opcode_mem_reg
@@ -153,7 +146,7 @@ assemble_arith() {
         text_hex+=$hex_code
         current_address=$((current_address + ${#hex_code}/2))
     else
-        # op reg, imm
+        
         if [[ "$operands" =~ $ri_operands ]]; then
             local reg="${BASH_REMATCH[1]}"
             local arg="${BASH_REMATCH[2]}"
@@ -205,30 +198,25 @@ assemble_arith() {
         fi
     fi
 }
-
 assemble_mem_operand() {
     local mem_op="$1"
     local reg_field="$2"
     local opcode="$3"
-
-    # very basic parsing for now
+    
     if [[ "$mem_op" =~ \[([a-z0-9]+)(([+-])([0-9]+))?\] ]]; then
         local base_reg="${BASH_REMATCH[1]}"
         local sign="${BASH_REMATCH[3]:+}"
         local disp_val="${BASH_REMATCH[4]:-0}"
         local disp=$((sign$disp_val))
-
         local mod
         local rm
         local sib=""
         local disp_hex=""
-
-        # validate base register exists
+        
         if [[ -z "${regs[$base_reg]:-}" ]]; then
             error_msg "invalid base register '$base_reg' in memory operand '$mem_op'"
         fi
-
-        # determine mod
+        
         if (( disp == 0 )); then
             mod=0
             if [[ "$base_reg" == "rbp" || "$base_reg" == "r13" ]]; then
@@ -242,14 +230,11 @@ assemble_mem_operand() {
             mod=2
             disp_hex=$(u32le "$disp")
         fi
-
         rm=${regs[$base_reg]}
-
         if [[ "$base_reg" == "rsp" || "$base_reg" == "r12" ]]; then
-            rm=4 # indicates SIB byte follows
-            sib="24" # SIB for [rsp/r12]
+            rm=4 
+            sib="24" 
         fi
-
         local mod_rm
         mod_rm=$(build_mod_rm "$mod" "$reg_field" "$rm")
         printf "%s%02x%s%s" "$opcode" "$mod_rm" "$sib" "$disp_hex"
@@ -257,15 +242,12 @@ assemble_mem_operand() {
         error_msg "unsupported memory operand in mov: $mem_op"
     fi
 }
-
 assemble_arith_mem() {
     local op="$1"
     local dst="$2"
     local src="$3"
-
-    local opcode_reg_mem # e.g. add reg, [mem]
-    local opcode_mem_reg # e.g. add [mem], reg
-
+    local opcode_reg_mem 
+    local opcode_mem_reg 
     case "$op" in
         add) opcode_reg_mem="4803"; opcode_mem_reg="4801" ;;
         sub) opcode_reg_mem="482b"; opcode_mem_reg="4829" ;;
@@ -274,23 +256,20 @@ assemble_arith_mem() {
         cmp) opcode_reg_mem="483b"; opcode_mem_reg="4839" ;;
         *) echo "unsupported arith op" >&2; return 1 ;;
     esac
-
-    if [[ "$dst" =~ ^\[.*\]$ ]]; then # op [mem], reg
+    if [[ "$dst" =~ ^\[.*\]$ ]]; then 
         hex_code=$(assemble_mem_operand "$dst" "${regs[$src]}" "$opcode_mem_reg")
         text_hex+=$hex_code
         current_address=$((current_address + ${#hex_code}/2))
-    elif [[ "$src" =~ ^\[.*\]$ ]]; then # op reg, [mem]
+    elif [[ "$src" =~ ^\[.*\]$ ]]; then 
         hex_code=$(assemble_mem_operand "$src" "${regs[$dst]}" "$opcode_reg_mem")
         text_hex+=$hex_code
         current_address=$((current_address + ${#hex_code}/2))
     fi
 }
-
 assemble_short_jump() {
     local op="$1"
     local lbl="$2"
     local opcode
-
     case "$op" in
         je) opcode="74" ;;
         jne) opcode="75" ;;
@@ -312,7 +291,6 @@ assemble_short_jump() {
         loopne) opcode="e0" ;;
         *) echo "unsupported jump/loop op" >&2; return 1;;
     esac
-
     if [[ -z "${labels[$lbl]:-}" ]]; then
         error_msg "unknown label '$lbl'"
     fi

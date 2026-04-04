@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 u64le() {
     local n=$1
     local b0=$((n & 0xff))

@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-
-# floating point operation lookup tables
 declare -A fp_opcodes
 fp_opcodes["movss_rr"]="f30f10"
 fp_opcodes["movsd_rr"]="f20f10"
@@ -14,8 +12,6 @@ fp_opcodes["divss_rr"]="f30f5e"
 fp_opcodes["divsd_rr"]="f20f5e"
 fp_opcodes["movsd_mem"]="f20f10"
 fp_opcodes["cvtsd2si"]="f20f2d"
-
-# register encoding map for mod_rm byte
 declare -A regs
 regs["rax"]=0
 regs["rcx"]=1
@@ -25,8 +21,6 @@ regs["rsp"]=4
 regs["rbp"]=5
 regs["rsi"]=6
 regs["rdi"]=7
-
-# xmm registers for floating point
 declare -A xmm_regs
 xmm_regs["xmm0"]=0
 xmm_regs["xmm1"]=1
@@ -44,15 +38,12 @@ xmm_regs["xmm12"]=12
 xmm_regs["xmm13"]=13
 xmm_regs["xmm14"]=14
 xmm_regs["xmm15"]=15
-
-# opcode arrays for cleaner dispatch
 declare -A arith_opcodes
 arith_opcodes["add"]="4801%02x"
 arith_opcodes["sub"]="4829%02x"
 arith_opcodes["or"]="4809%02x"
 arith_opcodes["and"]="4821%02x"
 arith_opcodes["cmp"]="4839%02x"
-
 declare -A jump_opcodes
 jump_opcodes["je"]="74"
 jump_opcodes["jne"]="75"
@@ -69,28 +60,23 @@ jump_opcodes["jno"]="71"
 jump_opcodes["js"]="78"
 jump_opcodes["jns"]="79"
 jump_opcodes["jmp"]="eb"
-
 declare -A loop_opcodes
 loop_opcodes["loop"]="e2"
 loop_opcodes["loope"]="e1"
 loop_opcodes["loopne"]="e0"
-
 declare -A unary_op_ext
 unary_op_ext["inc"]=0
 unary_op_ext["dec"]=1
 unary_op_ext["neg"]=3
 unary_op_ext["not"]=2
-
 declare -A shift_op_ext
 shift_op_ext["shl"]=4
 shift_op_ext["shr"]=5
 shift_op_ext["sar"]=7
-
 declare -A mul_op_ext
 mul_op_ext["mul"]=4
 mul_op_ext["div"]=6
 mul_op_ext["idiv"]=7
-
 declare -A cmov_codes
 cmov_codes["e"]=0x44
 cmov_codes["ne"]=0x45

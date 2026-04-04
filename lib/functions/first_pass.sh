@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-
-# perform first pass: parse instructions, calculate sizes, collect labels
 first_pass() {
     local raw_lines_ref="$1"
     local code_str="$2"
     local -n lines_ref="$1"
     
-    # re-initialize variables for first pass
+    
     data_bytes=""
     rodata_bytes=""
     bss_bytes=""
@@ -17,18 +15,17 @@ first_pass() {
     in_section=""
     line_number=0
     
-    # declare associative arrays
+    
     declare -gA labels
     declare -gA data_label_off
     declare -gA rodata_label_off
     declare -gA bss_label_off
     declare -gA equs
-    declare -gA externals  # For tracking external symbols in object mode
+    declare -gA externals  
     
-    # read lines
+    
     mapfile -t lines_ref <<<"$code_str"
-
-    # first pass: parse instructions, calculate sizes, collect labels
+    
     for raw in "${lines_ref[@]}"; do
         line_number=$((line_number + 1))
         line="${raw%%;*}"
@@ -52,14 +49,13 @@ first_pass() {
             continue
             ;;
         section\ .*)
-            # Handle any other sections that start with .sectionname
+            
             in_section="${line#section .}"
             in_section=$(trim_string "$in_section")
             continue
             ;;
         global\ *) continue ;;
         esac
-
         if [[ "$in_section" == "data" ]]; then
             if [[ "$line" =~ $equ_pattern ]]; then
                 name="${BASH_REMATCH[1]}"
@@ -73,16 +69,15 @@ first_pass() {
                 equs["$name"]=$val
                 continue
             fi
-
             if [[ "$line" =~ $db_pattern ]]; then
                 name="${BASH_REMATCH[1]}"
                 txt="${BASH_REMATCH[2]}"
                 extra="${BASH_REMATCH[4]}"
-                # process escape sequences using pure bash
-                txt="${txt//\\/\\\\x5c}"    # replace \ with \\x5c
+                
+                txt="${txt//\\/\\\\x5c}"    
                 txt="${txt//
-/\\n}"          # replace newlines with \n
-                txt="${txt//\"/\\\"}"           # replace " with \"
+/\\n}"          
+                txt="${txt//\"/\\\"}"           
                 hex=""
                 i=0
                 while [ "$i" -lt ${#txt} ]; do
@@ -98,7 +93,6 @@ first_pass() {
                 data_bytes+="$hex"
                 continue
             fi
-
             if [[ "$line" =~ $dq_pattern ]]; then
                 name="${BASH_REMATCH[1]}"
                 val="${BASH_REMATCH[2]}"
@@ -111,7 +105,6 @@ first_pass() {
                 data_bytes+=$(u64le $val)
                 continue
             fi
-
             error_msg "at line $line_number: unsupported data line format: '$line'"
             return 1
         elif [[ "$in_section" == "rodata" ]]; then
@@ -119,11 +112,11 @@ first_pass() {
                 name="${BASH_REMATCH[1]}"
                 txt="${BASH_REMATCH[2]}"
                 extra="${BASH_REMATCH[4]}"
-                # process escape sequences using pure bash
-                txt="${txt//\\/\\\\x5c}"    # replace \ with \\x5c
+                
+                txt="${txt//\\/\\\\x5c}"    
                 txt="${txt//
-/\\n}"          # replace newlines with \n
-                txt="${txt//\"/\\\"}"           # replace " with \"
+/\\n}"          
+                txt="${txt//\"/\\\"}"           
                 hex=""
                 i=0
                 while [ "$i" -lt ${#txt} ]; do
@@ -135,13 +128,12 @@ first_pass() {
                 if [ -n "$extra" ]; then
                     hex+="$(printf "%02x" "$extra")"
                 fi
-                # Use rodata_label_off for rodata section
+                
                 declare -gA rodata_label_off
                 rodata_label_off["$name"]=$((${#rodata_bytes} / 2))
                 rodata_bytes+="$hex"
                 continue
             fi
-
             if [[ "$line" =~ $dq_pattern ]]; then
                 name="${BASH_REMATCH[1]}"
                 val="${BASH_REMATCH[2]}"
@@ -154,11 +146,10 @@ first_pass() {
                 rodata_bytes+=$(u64le $val)
                 continue
             fi
-
             error_msg "at line $line_number: unsupported rodata line format: '$line'"
             return 1
         elif [[ "$in_section" == "bss" ]]; then
-            # BSS section contains uninitialized data - just record sizes
+            
             if [[ "$line" =~ $dq_pattern ]]; then
                 name="${BASH_REMATCH[1]}"
                 val="${BASH_REMATCH[2]}"
@@ -167,14 +158,13 @@ first_pass() {
                 else
                     val=$((val))
                 fi
-                # For BSS, we just reserve space - no data content
+                
                 declare -gA bss_label_off
                 bss_label_off["$name"]=$((${#bss_bytes} / 2))
-                # Add zero bytes for the size specified
+                
                 bss_bytes+=$(generate_zeros $val)
                 continue
             fi
-
             error_msg "at line $line_number: unsupported bss line format: '$line'"
             return 1
         elif [[ "$in_section" == "text" ]]; then
@@ -185,73 +175,73 @@ first_pass() {
             fi
             text_ins+=("$line")
             
-            # handle mov reg, reg (3 bytes)
+            
             if [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
-            # handle CMOV (4 bytes)
+            
             elif [[ "$line" =~ $cmov_pattern ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
-            # handle various MOV patterns
+            
             elif [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(.*)$ ]]; then
                 calculate_mov_size
-            # handle simple instructions (1-2 bytes)
+            
             elif [[ "$line" =~ ^(syscall|nop|ret|leave|cqo|cdqe)$ ]]; then
                 calculate_simple_instr_size
-            # handle XOR reg, reg with same register (3 bytes)
+            
             elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
-            # handle PUSH/POP (1 byte each)
+            
             elif [[ "$line" =~ ^(push|pop)[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 1))
-            # handle arithmetic reg, reg (3 bytes)
+            
             elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
-            # handle arithmetic reg, immediate/memory
+            
             elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]*(.*)$ ]]; then
                 calculate_arith_ri_size
-            # handle jumps (2 bytes)
+            
             elif [[ "$line" =~ ^(je|jne|jg|jl|jge|jle|ja|jb|jae|jbe|jo|jno|js|jns|jmp)[[:space:]]+(.*)$ ]]; then
                 text_bytes_len=$((text_bytes_len + 2))
-            # handle loops (2 bytes)
+            
             elif [[ "$line" =~ ^(loop|loope|loopne)[[:space:]]+(.*)$ ]]; then
                 text_bytes_len=$((text_bytes_len + 2))
-            # handle unary operations (inc, dec, neg, not) (3 bytes)
+            
             elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
-            # handle CALL (5 bytes)
+            
             elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
                 text_bytes_len=$((text_bytes_len + 5))
-            # handle MUL/DIV/IDIV (3 bytes)
+            
             elif [[ "$line" =~ ^(mul|div|idiv)[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
-            # handle IMUL reg, reg (4 bytes)
+            
             elif [[ "$line" =~ ^(imul)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
-            # handle LEA (7 bytes)
+            
             elif [[ "$line" =~ ^lea[[:space:]]+(r[a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
                 text_bytes_len=$((text_bytes_len + 7))
-            # handle shifts (4 bytes)
+            
             elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
-            # handle TEST reg, reg (3 bytes)
+            
             elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
-            # handle TEST reg, immediate (7 bytes)
+            
             elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
                 text_bytes_len=$((text_bytes_len + 7))
-            # handle MOVZX/MOVSX with 8/16-bit registers (4 bytes)
+            
             elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+(r[a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh])$ ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
-            # handle MOVZX/MOVSX with 32/64-bit registers (4 bytes)
+            
             elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
-            # handle MOVSXD (3 bytes)
+            
             elif [[ "$line" =~ ^movsxd[[:space:]]+(r[a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
-            # handle SETCC (3 bytes)
+            
             elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
-            # handle floating point instructions (4 bytes each)
+            
             elif [[ "$line" =~ $movss_rr_pattern ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
             elif [[ "$line" =~ $movsd_rr_pattern ]]; then

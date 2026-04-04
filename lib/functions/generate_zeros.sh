@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 generate_zeros() {
     local count="$1"
     local i

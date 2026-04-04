@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-
-# perform second pass: generate machine code hex for each instruction
 second_pass() {
     local text_ins_ref="$1"
     local -n ins_array="$1"
@@ -9,7 +7,7 @@ second_pass() {
     current_address=0
     
     for line in "${ins_array[@]}"; do
-        # handle floating point operations with a generalized function approach for register-register ops
+        
         if [[ "$line" =~ $movss_rr_pattern ]]; then
             handle_fp_operation "movss_rr" 4
         elif [[ "$line" =~ $movsd_rr_pattern ]]; then
@@ -85,22 +83,21 @@ second_pass() {
             local src="${mov_operands#*,}"
             dst=$(trim_string "$dst")
             src=$(trim_string "$src")
-
             if [[ "$dst" =~ ^r[a-z]{2}$ && "$src" =~ ^r[a-z]{2}$ ]]; then
-                # mov reg, reg
+                
                 mod_rm=$((0xc0 + regs[$src] * 8 + regs[$dst]))
                 text_hex+=$(printf "4889%02x" "$mod_rm")
                 current_address=$((current_address + 3))
-            elif [[ "$dst" =~ ^\[.*\]$ ]]; then # mov [mem], reg
+            elif [[ "$dst" =~ ^\[.*\]$ ]]; then 
                 hex_code=$(assemble_mem_operand "$dst" "${regs[$src]}" "4889")
                 text_hex+=$hex_code
                 current_address=$((current_address + ${#hex_code}/2))
-            elif [[ "$src" =~ ^\[.*\]$ ]]; then # mov reg, [mem]
+            elif [[ "$src" =~ ^\[.*\]$ ]]; then 
                 hex_code=$(assemble_mem_operand "$src" "${regs[$dst]}" "488b")
                 text_hex+=$hex_code
                 current_address=$((current_address + ${#hex_code}/2))
             else
-                # mov reg, imm
+                
                 local reg="$dst"
                 local arg="$src"
                 local val_is_immediate=0
@@ -126,7 +123,6 @@ second_pass() {
                 else
                     val_is_immediate=0
                 fi
-
                 if [[ "$val_is_immediate" -eq 1 ]]; then
                     if (( val >= -2147483648 && val <= 2147483647 )); then
                         opcode=$((0xc0 + regs[$reg]))
@@ -179,7 +175,7 @@ second_pass() {
             text_hex+=$(printf "0f%02x%02x" "$cc" "$mod_rm")
             current_address=$((current_address + 4))
         elif [[ "$line" =~ ^(syscall|nop|ret|leave|cqo|cdqe)$ ]]; then
-            # handle simple instructions using lookup table
+            
             case "$line" in
                 syscall) text_hex+="0f05"; current_address=$((current_address + 2)) ;;
                 nop) text_hex+="90"; current_address=$((current_address + 1)) ;;
@@ -210,9 +206,8 @@ second_pass() {
             local src="${operands#*,}"
             dst=$(trim_string "$dst")
             src=$(trim_string "$src")
-
             if [[ "$dst" =~ ^r[a-z]{2}$ && "$src" =~ ^r[a-z]{2}$ ]]; then
-                # op reg, reg
+                
                 local reg1="$dst"
                 local reg2="$src"
                 local mod_rm=$((0xc0 | (regs[$reg2] << 3) | regs[$reg1]))
@@ -225,13 +220,12 @@ second_pass() {
                 esac
                 current_address=$((current_address + 3))
             elif [[ "$dst" =~ ^\[.*\]$ || "$src" =~ ^\[.*\]$ ]]; then
-                # op with memory
+                
                 assemble_arith_mem "$op" "$dst" "$src"
             else
-                # op reg, imm
+                
                 local reg="$dst"
                 local arg="$src"
-
                 if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
                     val=$((16#${BASH_REMATCH[1]}))
                 elif [[ "$arg" =~ ^[0-9]+$ ]]; then
@@ -240,7 +234,6 @@ second_pass() {
                     echo "error: unknown immediate value '$arg' in '$line'" >&2
                     return 1
                 fi
-
                 if [[ "$reg" == "rax" ]]; then
                     case "$op" in
                     add)
@@ -340,7 +333,7 @@ second_pass() {
             addr=$((data_vaddr + data_label_off[$lbl]))
             mod_rm=$(((regs[$reg] << 3) | 5))
             text_hex+=$(printf "488d%02x" $mod_rm)
-            # rip-relative addressing, offset is from the *next* instruction
+            
             offset=$((addr - (text_vaddr + current_address + 7)))
             text_hex+=$(u32le $offset)
             current_address=$((current_address + 7))
