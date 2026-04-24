@@ -35,7 +35,7 @@ parse_relocations() {
         while ((pos + 1 < ${#hex_str})); do
             local byte_hex="${hex_str:$pos:2}"
             [[ "$byte_hex" == "00" ]] && break
-            local byte_val=$((16#$byte_hex))
+            local byte_val=$(hex_to_dec "$byte_hex")
             ((byte_val >= 32 && byte_val < 127)) && result+=$(printf "\\$(printf '%03o' "$byte_val")")
             pos=$((pos + 2))
         done
@@ -79,13 +79,13 @@ parse_relocations() {
         for ((i = 14; i >= 0; i -= 2)); do
             r_off+="${r_off_hex:$i:2}"
         done
-        local r_offset_val=$((16#$r_off))
+        local r_offset_val=$(hex_to_dec "$r_off")
         local r_info_hex="${rela_hex:$((offset + 16)):16}"
         local r_info=""
         for ((i = 14; i >= 0; i -= 2)); do
             r_info+="${r_info_hex:$i:2}"
         done
-        local r_info_val=$((16#$r_info))
+        local r_info_val=$(hex_to_dec "$r_info")
         local sym_index=$((r_info_val >> 32))
         local r_type=$((r_info_val & 0xFFFFFFFF))
         local r_addend_hex="${rela_hex:$((offset + 32)):16}"
@@ -93,20 +93,20 @@ parse_relocations() {
         for ((i = 14; i >= 0; i -= 2)); do
             r_addend+="${r_addend_hex:$i:2}"
         done
-        local r_addend_val=$((16#$r_addend))
+        local r_addend_val=$(hex_to_dec "$r_addend")
         local sym_offset=$((sym_index * 48))
         local st_name_hex="${symtab_hex:$sym_offset:8}"
         local st_name=""
         for ((i = 6; i >= 0; i -= 2)); do
             st_name+="${st_name_hex:$i:2}"
         done
-        local st_name_val=$((16#$st_name))
+        local st_name_val=$(hex_to_dec "$st_name")
         local sym_name=""
         local pos=$((st_name_val * 2))
         while ((pos + 1 < ${#strtab_hex})); do
             local byte_hex="${strtab_hex:$pos:2}"
             [[ "$byte_hex" == "00" ]] && break
-            local byte_val=$((16#$byte_hex))
+            local byte_val=$(hex_to_dec "$byte_hex")
             ((byte_val >= 32 && byte_val < 127)) && sym_name+=$(printf "\\$(printf '%03o' "$byte_val")")
             pos=$((pos + 2))
         done

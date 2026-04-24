@@ -21,6 +21,7 @@ generate_elf_object_with_symbols() {
     local data_labels_ref="$6"
     local relocations_ref="$7"
     local externals_ref="$8"
+    local mode="${9:-obj}"
     local -n labels_n="$3"
     local -n equs_n="$4"
     local -n data_labels_n="$6"
@@ -83,19 +84,27 @@ generate_elf_object_with_symbols() {
     local symtab_off=$((strtab_off + symstrtab_size))
     local rela_off=$((symtab_off + symtab_size))
     local sec_header_table_off=$((rela_off + rela_size))
-    local elf_header=""
-    elf_header+="7f454c46"
-    elf_header+="02"
-    elf_header+="01"
-    elf_header+="01"
-    elf_header+="00"
-    elf_header+="00"
-    elf_header+="00000000000000"
-    elf_header+="0100"
-    elf_header+="3e00"
-    elf_header+="01000000"
-    elf_header+="0000000000000000"
-    elf_header+="0000000000000000"
+local elf_header=""
+    # Build ELF64 header step by step, counting bytes carefully
+    # Position 0-15: e_ident
+    elf_header="7f454c46"      # bytes 0-3: magic (4 bytes = 8 hex chars)
+    elf_header+="02"           # byte 4: ELFCLASS64 = 2 (1 byte)
+    elf_header+="01"           # byte 5: ELFDATA2LSB = 1 (1 byte)
+    elf_header+="01"           # byte 6: EV_CURRENT = 1 (1 byte)
+    elf_header+="00"           # byte 7: ELFOSABI_SYSV = 0
+    elf_header+="00"           # byte 8: ABI version = 0 
+    # Total so far: 4 + 1 + 1 + 1 + 1 + 1 = 9 bytes. Need 7 more to reach byte 16.
+    elf_header+="00000000000000"  # bytes 9-15: pad (7 bytes = 14 hex chars)
+    # Now at byte 16 (correct position for e_type)
+    case "$mode" in
+        obj) elf_header+="0100" ;;   # ET_REL = 0x0001
+        *)   elf_header+="0200" ;;   # ET_EXEC = 0x0002
+    esac
+    # Position 18-19: e_machine (x86_64 = 0x3E)
+    elf_header+="3e00"  # EM_X86_64 in little-endian
+    elf_header+="01000000"    # e_version = EV_CURRENT (1)
+    elf_header+="0000000000000000"  # e_entry = 0 (no entry for relocatable)
+    elf_header+="0000000000000000"  # e_phoff = 0 (no program headers)
     local shoff_hex=$(printf "%016x" $sec_header_table_off)
     elf_header+=$(reverse_endian "$shoff_hex")
     elf_header+="00000000"
