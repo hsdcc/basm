@@ -525,6 +525,140 @@ fi
 
 rm -f "$obj_ext1" "$obj_ext2" "$exe_ext"
 
+echo "	testing linking_dup_symbol"
+asm_dup1="section .text
+global _start
+_start:
+    mov rax, 60
+    mov rdi, 1
+    syscall"
+asm_dup2="section .text
+global _start
+_start:
+    mov rax, 60
+    mov rdi, 2
+    syscall"
+obj_dup1="$(mktemp).o"
+obj_dup2="$(mktemp).o"
+exe_dup="$(mktemp)"
+if ! basm_assemble "$asm_dup1" "$obj_dup1" "obj" || ! basm_assemble "$asm_dup2" "$obj_dup2" "obj"; then
+  echo "	[FAIL] linking_dup_symbol: failed to create object files"
+  failed_tests=$((failed_tests + 1))
+elif link_objects "$obj_dup1" "$obj_dup2" "$exe_dup" 2>/dev/null; then
+  echo "	[FAIL] linking_dup_symbol: expected link failure due to duplicate symbol"
+  failed_tests=$((failed_tests + 1))
+else
+  echo "	[PASS] linking_dup_symbol"
+fi
+rm -f "$obj_dup1" "$obj_dup2" "$exe_dup"
+
+echo "	testing linking_undef_sym"
+asm_undef1="section .text
+global _start
+extern missing
+_start:
+    mov rax, 60
+    mov rdi, missing
+    syscall"
+asm_undef2="section .text
+global something
+something:
+    ret"
+obj_undef1="$(mktemp).o"
+obj_undef2="$(mktemp).o"
+exe_undef="$(mktemp)"
+if ! basm_assemble "$asm_undef1" "$obj_undef1" "obj" || ! basm_assemble "$asm_undef2" "$obj_undef2" "obj"; then
+  echo "	[FAIL] linking_undef_sym: failed to create object files"
+  failed_tests=$((failed_tests + 1))
+elif link_objects "$obj_undef1" "$obj_undef2" "$exe_undef" 2>/dev/null; then
+  echo "	[FAIL] linking_undef_sym: expected link failure due to undefined symbol"
+  failed_tests=$((failed_tests + 1))
+else
+  echo "	[PASS] linking_undef_sym"
+fi
+rm -f "$obj_undef1" "$obj_undef2" "$exe_undef"
+
+echo "	testing linking_single_obj_reloc"
+asm_single_reloc="section .text
+global _start
+_start:
+    mov rax, 1
+    mov rdi, 1
+    mov rsi, msg
+    mov rdx, 5
+    syscall
+    mov rax, 60
+    xor rdi, rdi
+    syscall
+section .data
+msg: db \"hello\", 0"
+obj_single_reloc="$(mktemp).o"
+exe_single_reloc="$(mktemp)"
+if ! basm_assemble "$asm_single_reloc" "$obj_single_reloc" "obj"; then
+  echo "	[FAIL] linking_single_obj_reloc: failed to create object file"
+  failed_tests=$((failed_tests + 1))
+elif ! link_objects "$obj_single_reloc" "$exe_single_reloc"; then
+  echo "	[FAIL] linking_single_obj_reloc: failed to link"
+  failed_tests=$((failed_tests + 1))
+else
+  set +e
+  output="$("$exe_single_reloc" 2>&1)"
+  actual_exit=$?
+  set -e
+  if [[ "$output" != "hello" ]]; then
+    echo "	[FAIL] linking_single_obj_reloc: unexpected output '$output'"
+    failed_tests=$((failed_tests + 1))
+  elif ((actual_exit != 0)); then
+    echo "	[FAIL] linking_single_obj_reloc: exit code $actual_exit"
+    failed_tests=$((failed_tests + 1))
+  else
+    echo "	[PASS] linking_single_obj_reloc"
+  fi
+fi
+rm -f "$obj_single_reloc" "$exe_single_reloc"
+
+echo "	testing linking_section_alignment"
+asm_align1="section .text
+global _start
+_start:
+    mov rax, 60
+    mov rdi, 7
+    syscall"
+asm_align2="section .text
+global helper
+helper:
+    ret
+section .data
+val: dq 42"
+obj_align1="$(mktemp).o"
+obj_align2="$(mktemp).o"
+exe_align="$(mktemp)"
+if ! basm_assemble "$asm_align1" "$obj_align1" "obj" || ! basm_assemble "$asm_align2" "$obj_align2" "obj"; then
+  echo "	[FAIL] linking_section_alignment: failed to create object files"
+  failed_tests=$((failed_tests + 1))
+elif ! link_objects "$obj_align1" "$obj_align2" "$exe_align"; then
+  echo "	[FAIL] linking_section_alignment: failed to link"
+  failed_tests=$((failed_tests + 1))
+else
+  set +e
+  "$exe_align"
+  actual_exit=$?
+  set -e
+  if ((actual_exit != 7)); then
+    echo "	[FAIL] linking_section_alignment: expected exit 7, got $actual_exit"
+    failed_tests=$((failed_tests + 1))
+  else
+    exe_size=$(wc -c <"$exe_align")
+    if ((exe_size >= 544)); then
+      echo "	[PASS] linking_section_alignment (exe size: $exe_size bytes)"
+    else
+      echo "	[FAIL] linking_section_alignment: executable too small ($exe_size bytes)"
+      failed_tests=$((failed_tests + 1))
+    fi
+  fi
+fi
+rm -f "$obj_align1" "$obj_align2" "$exe_align"
+
 if ((failed_tests > 0)); then
   echo
   echo "$failed_tests test(s) failed."
