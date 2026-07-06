@@ -303,7 +303,27 @@ second_pass() {
                     *) error_msg "unsupported jump for extern: $op" ;;
                 esac
             else
-                assemble_short_jump "$op" "$lbl"
+                # near encoding for jmp/cond jumps, short for loops
+                if [[ "$op" == "jmp" ]]; then
+                    local target=${labels[$lbl]}
+                    local offset=$((target - (current_address + 5)))
+                    text_hex+="e9$(u32le $offset)"
+                    current_address=$((current_address + 5))
+                elif [[ "$op" == "loop" || "$op" == "loope" || "$op" == "loopne" ]]; then
+                    assemble_short_jump "$op" "$lbl"
+                else
+                    local target=${labels[$lbl]}
+                    local offset=$((target - (current_address + 6)))
+                    local cc=0
+                    case "$op" in
+                        je) cc=$((0x84)) ;; jne) cc=$((0x85)) ;; jg) cc=$((0x8f)) ;; jl) cc=$((0x8c)) ;;
+                        jge) cc=$((0x8d)) ;; jle) cc=$((0x8e)) ;; ja) cc=$((0x87)) ;; jb) cc=$((0x82)) ;;
+                        jae) cc=$((0x83)) ;; jbe) cc=$((0x86)) ;; jo) cc=$((0x80)) ;; jno) cc=$((0x81)) ;;
+                        js) cc=$((0x88)) ;; jns) cc=$((0x89)) ;;
+                    esac
+                    text_hex+=$(printf "0f%02x" $cc)$(u32le $offset)
+                    current_address=$((current_address + 6))
+                fi
             fi
         elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
             op="${BASH_REMATCH[1]}"

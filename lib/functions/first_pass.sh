@@ -221,7 +221,11 @@ first_pass() {
                         text_bytes_len=$((text_bytes_len + 6))
                     fi
                 else
-                    text_bytes_len=$((text_bytes_len + 2))
+                    if [[ "${BASH_REMATCH[1]}" == "jmp" ]]; then
+                        text_bytes_len=$((text_bytes_len + 5))
+                    else
+                        text_bytes_len=$((text_bytes_len + 6))
+                    fi
                 fi
             
             elif [[ "$line" =~ ^(loop|loope|loopne)[[:space:]]+(.*)$ ]]; then
