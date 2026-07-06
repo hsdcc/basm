@@ -30,6 +30,8 @@ linker_resolve() {
       local sym_val="${rest#*:}"
 
       [[ -z "$sym_name" ]] && continue
+      # skip purely numeric names
+      [[ "$sym_name" =~ ^[0-9]+$ ]] && continue
 
       if (( shndx > 0 )); then
         # defined — check duplicate

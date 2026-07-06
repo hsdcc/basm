@@ -212,7 +212,17 @@ first_pass() {
                 calculate_arith_ri_size
             
             elif [[ "$line" =~ ^(je|jne|jg|jl|jge|jle|ja|jb|jae|jbe|jo|jno|js|jns|jmp)[[:space:]]+(.*)$ ]]; then
-                text_bytes_len=$((text_bytes_len + 2))
+                local jlbl="${BASH_REMATCH[2]}"
+                jlbl="$(trim_string "$jlbl")"
+                if [[ -n "${externals[$jlbl]:-}" ]]; then
+                    if [[ "${BASH_REMATCH[1]}" == "jmp" ]]; then
+                        text_bytes_len=$((text_bytes_len + 5))
+                    else
+                        text_bytes_len=$((text_bytes_len + 6))
+                    fi
+                else
+                    text_bytes_len=$((text_bytes_len + 2))
+                fi
             
             elif [[ "$line" =~ ^(loop|loope|loopne)[[:space:]]+(.*)$ ]]; then
                 text_bytes_len=$((text_bytes_len + 2))

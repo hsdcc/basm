@@ -279,7 +279,32 @@ second_pass() {
         elif [[ "$line" =~ ^(je|jne|jg|jl|jge|jle|ja|jb|jae|jbe|jo|jno|js|jns|jmp|loop|loope|loopne)[[:space:]]+(.*)$ ]]; then
             local op="${BASH_REMATCH[1]}"
             local lbl="${BASH_REMATCH[2]}"
-            assemble_short_jump "$op" "$lbl"
+            if [[ -n "${externals[$lbl]:-}" ]]; then
+                case "$op" in
+                    jmp)
+                        text_hex+="e900000000"
+                        relocations+=("$((current_address + 1)):${lbl}:2:-4")
+                        current_address=$((current_address + 5))
+                        ;;
+                    je)  text_hex+="0f8400000000"; relocations+=("$((current_address + 2)):${lbl}:2:-4"); current_address=$((current_address + 6)) ;;
+                    jne) text_hex+="0f8500000000"; relocations+=("$((current_address + 2)):${lbl}:2:-4"); current_address=$((current_address + 6)) ;;
+                    jg)  text_hex+="0f8f00000000"; relocations+=("$((current_address + 2)):${lbl}:2:-4"); current_address=$((current_address + 6)) ;;
+                    jl)  text_hex+="0f8c00000000"; relocations+=("$((current_address + 2)):${lbl}:2:-4"); current_address=$((current_address + 6)) ;;
+                    jge) text_hex+="0f8d00000000"; relocations+=("$((current_address + 2)):${lbl}:2:-4"); current_address=$((current_address + 6)) ;;
+                    jle) text_hex+="0f8e00000000"; relocations+=("$((current_address + 2)):${lbl}:2:-4"); current_address=$((current_address + 6)) ;;
+                    ja)  text_hex+="0f8700000000"; relocations+=("$((current_address + 2)):${lbl}:2:-4"); current_address=$((current_address + 6)) ;;
+                    jb)  text_hex+="0f8200000000"; relocations+=("$((current_address + 2)):${lbl}:2:-4"); current_address=$((current_address + 6)) ;;
+                    jae) text_hex+="0f8300000000"; relocations+=("$((current_address + 2)):${lbl}:2:-4"); current_address=$((current_address + 6)) ;;
+                    jbe) text_hex+="0f8600000000"; relocations+=("$((current_address + 2)):${lbl}:2:-4"); current_address=$((current_address + 6)) ;;
+                    jo)  text_hex+="0f8000000000"; relocations+=("$((current_address + 2)):${lbl}:2:-4"); current_address=$((current_address + 6)) ;;
+                    jno) text_hex+="0f8100000000"; relocations+=("$((current_address + 2)):${lbl}:2:-4"); current_address=$((current_address + 6)) ;;
+                    js)  text_hex+="0f8800000000"; relocations+=("$((current_address + 2)):${lbl}:2:-4"); current_address=$((current_address + 6)) ;;
+                    jns) text_hex+="0f8900000000"; relocations+=("$((current_address + 2)):${lbl}:2:-4"); current_address=$((current_address + 6)) ;;
+                    *) error_msg "unsupported jump for extern: $op" ;;
+                esac
+            else
+                assemble_short_jump "$op" "$lbl"
+            fi
         elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
             op="${BASH_REMATCH[1]}"
             reg="${BASH_REMATCH[2]}"
@@ -302,13 +327,8 @@ second_pass() {
             current_address=$((current_address + 3))
         elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
             lbl="${BASH_REMATCH[1]}"
-            if [[ -z "${labels[$lbl]:-}" ]]; then
-                error_msg "unknown label '$lbl' in call instruction '$line'"
-                return 1
-            fi
-            target_address=${labels[$lbl]}
-            offset=$((target_address - (current_address + 5)))
-            text_hex+="e8$(u32le $offset)"
+            text_hex+="e800000000"
+            relocations+=("$((current_address + 1)):${lbl}:2:-4")
             current_address=$((current_address + 5))
         elif [[ "$line" =~ ^(mul|div|idiv)[[:space:]]+(r[a-z]{2})$ ]]; then
             op="${BASH_REMATCH[1]}"
@@ -331,13 +351,9 @@ second_pass() {
         elif [[ "$line" =~ ^lea[[:space:]]+(r[a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
             reg="${BASH_REMATCH[1]}"
             lbl="${BASH_REMATCH[2]}"
-            if [[ -z "${data_label_off[$lbl]:-}" ]]; then
-                echo "unknown label $lbl" >&2
-                return 1
-            fi
             mod_rm=$(((regs[$reg] << 3) | 5))
             text_hex+=$(printf "488d%02x" $mod_rm)
-            relocations+=("$((current_address + 3)):${lbl}:2:0")
+            relocations+=("$((current_address + 3)):${lbl}:2:-4")
             text_hex+="00000000"
             current_address=$((current_address + 7))
         elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then

@@ -174,6 +174,7 @@ for asm_file in "$test_asm_dir"/*.asm; do
   fi
 
   asm_filename=$(basename "$asm_file")
+      [[ "$asm_filename" == extern_* ]] && continue
   test_name="dynamic_${asm_filename%.*}"
 
   expected_value=$(get_expected_from_asm "$asm_file")
@@ -524,6 +525,158 @@ else
 fi
 
 rm -f "$obj_ext1" "$obj_ext2" "$exe_ext"
+
+
+echo "	testing linking_extern_call"
+asm_call_target="section .text
+	global my_func
+my_func:
+	mov rax, 42
+	ret"
+asm_call_caller="section .text
+	global _start
+	extern my_func
+_start:
+	call my_func
+	mov rdi, rax
+	mov rax, 60
+	syscall"
+obj_call_t="$(mktemp).o"
+obj_call_c="$(mktemp).o"
+exe_call="$(mktemp)"
+if ! basm_assemble "$asm_call_target" "$obj_call_t" "obj" || ! basm_assemble "$asm_call_caller" "$obj_call_c" "obj"; then
+  echo "	[FAIL] linking_extern_call: failed to create object files"
+  failed_tests=$((failed_tests + 1))
+elif ! link_objects "$obj_call_t" "$obj_call_c" "$exe_call"; then
+  echo "	[FAIL] linking_extern_call: failed to link objects"
+  failed_tests=$((failed_tests + 1))
+else
+  set +e
+  "$exe_call"
+  actual_exit=$?
+  set -e
+  if ((actual_exit == 42)); then
+    echo "	[PASS] linking_extern_call"
+  else
+    echo "	[FAIL] linking_extern_call: expected exit 42, got $actual_exit"
+    failed_tests=$((failed_tests + 1))
+  fi
+fi
+rm -f "$obj_call_t" "$obj_call_c" "$exe_call"
+
+echo "	testing linking_extern_jmp"
+asm_jmp_target="section .text
+	global jmp_target
+jmp_target:
+	mov rax, 60
+	mov rdi, 99
+	syscall"
+asm_jmp_caller="section .text
+	global _start
+	extern jmp_target
+_start:
+	jmp jmp_target"
+obj_jmp_t="$(mktemp).o"
+obj_jmp_c="$(mktemp).o"
+exe_jmp="$(mktemp)"
+if ! basm_assemble "$asm_jmp_target" "$obj_jmp_t" "obj" || ! basm_assemble "$asm_jmp_caller" "$obj_jmp_c" "obj"; then
+  echo "	[FAIL] linking_extern_jmp: failed to create object files"
+  failed_tests=$((failed_tests + 1))
+elif ! link_objects "$obj_jmp_t" "$obj_jmp_c" "$exe_jmp"; then
+  echo "	[FAIL] linking_extern_jmp: failed to link objects"
+  failed_tests=$((failed_tests + 1))
+else
+  set +e
+  "$exe_jmp"
+  actual_exit=$?
+  set -e
+  if ((actual_exit == 99)); then
+    echo "	[PASS] linking_extern_jmp"
+  else
+    echo "	[FAIL] linking_extern_jmp: expected exit 99, got $actual_exit"
+    failed_tests=$((failed_tests + 1))
+  fi
+fi
+rm -f "$obj_jmp_t" "$obj_jmp_c" "$exe_jmp"
+
+echo "	testing linking_extern_lea"
+asm_lea_data="section .data
+	global msg
+msg: db \"hello\", 0"
+asm_lea_caller="section .text
+	global _start
+	extern msg
+_start:
+	mov rax, 1
+	mov rdi, 1
+	lea rsi, [msg]
+	mov rdx, 5
+	syscall
+	mov rax, 60
+	xor rdi, rdi
+	syscall"
+obj_lea_d="$(mktemp).o"
+obj_lea_c="$(mktemp).o"
+exe_lea="$(mktemp)"
+if ! basm_assemble "$asm_lea_data" "$obj_lea_d" "obj" || ! basm_assemble "$asm_lea_caller" "$obj_lea_c" "obj"; then
+  echo "	[FAIL] linking_extern_lea: failed to create object files"
+  failed_tests=$((failed_tests + 1))
+elif ! link_objects "$obj_lea_d" "$obj_lea_c" "$exe_lea"; then
+  echo "	[FAIL] linking_extern_lea: failed to link objects"
+  failed_tests=$((failed_tests + 1))
+else
+  set +e
+  output="$("$exe_lea" 2>&1)"
+  actual_exit=$?
+  set -e
+  if [[ "$output" == "hello" ]] && ((actual_exit == 0)); then
+    echo "	[PASS] linking_extern_lea"
+  else
+    echo "	[FAIL] linking_extern_lea: output='$output' exit=$actual_exit"
+    failed_tests=$((failed_tests + 1))
+  fi
+fi
+rm -f "$obj_lea_d" "$obj_lea_c" "$exe_lea"
+
+echo "	testing linking_extern_je"
+asm_je_target="section .text
+	global je_target
+je_target:
+	mov rax, 60
+	mov rdi, 1
+	syscall"
+asm_je_caller="section .text
+	global _start
+	extern je_target
+_start:
+	xor rax, rax
+	test rax, rax
+	je je_target
+	mov rax, 60
+	mov rdi, 2
+	syscall"
+obj_je_t="$(mktemp).o"
+obj_je_c="$(mktemp).o"
+exe_je="$(mktemp)"
+if ! basm_assemble "$asm_je_target" "$obj_je_t" "obj" || ! basm_assemble "$asm_je_caller" "$obj_je_c" "obj"; then
+  echo "	[FAIL] linking_extern_je: failed to create object files"
+  failed_tests=$((failed_tests + 1))
+elif ! link_objects "$obj_je_t" "$obj_je_c" "$exe_je"; then
+  echo "	[FAIL] linking_extern_je: failed to link objects"
+  failed_tests=$((failed_tests + 1))
+else
+  set +e
+  "$exe_je"
+  actual_exit=$?
+  set -e
+  if ((actual_exit == 1)); then
+    echo "	[PASS] linking_extern_je"
+  else
+    echo "	[FAIL] linking_extern_je: expected exit 1, got $actual_exit"
+    failed_tests=$((failed_tests + 1))
+  fi
+fi
+rm -f "$obj_je_t" "$obj_je_c" "$exe_je"
 
 echo "	testing linking_dup_symbol"
 asm_dup1="section .text

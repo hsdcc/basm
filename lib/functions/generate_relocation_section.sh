@@ -4,11 +4,13 @@ generate_relocation_section() {
     local relocations_ref="$1"
     local labels_ref="$2"
     local data_labels_ref="$3"
-    local output_ref="$4"
+    local externals_ref="$4"
+    local output_ref="$5"
     local -n _gr_relocs="$1"
     local -n _gr_labels="$2"
     local -n _gr_data_labels="$3"
-    local -n _gr_output="$4"
+    local -n _gr_externals="$4"
+    local -n _gr_output="$5"
     _gr_output=""
     local sym_idx=1
     for label_name in "${!_gr_labels[@]}"; do
@@ -16,6 +18,10 @@ generate_relocation_section() {
     done
     local data_sym_start=$sym_idx
     for label_name in "${!_gr_data_labels[@]}"; do
+        sym_idx=$((sym_idx + 1))
+    done
+    local ext_sym_start=$sym_idx
+    for ext_name in "${!_gr_externals[@]}"; do
         sym_idx=$((sym_idx + 1))
     done
     for reloc_entry in "${_gr_relocs[@]}"; do
@@ -31,6 +37,13 @@ generate_relocation_section() {
             idx=$data_sym_start
             for label_name in "${!_gr_data_labels[@]}"; do
                 [[ "$label_name" == "$sym_name" ]] && { sym_index=$idx; found=1; break; }
+                idx=$((idx + 1))
+            done
+        fi
+        if [[ $found -eq 0 ]]; then
+            idx=$ext_sym_start
+            for ext_name in "${!_gr_externals[@]}"; do
+                [[ "$ext_name" == "$sym_name" ]] && { sym_index=$idx; found=1; break; }
                 idx=$((idx + 1))
             done
         fi

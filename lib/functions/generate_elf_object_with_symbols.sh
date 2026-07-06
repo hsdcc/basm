@@ -34,8 +34,8 @@ generate_elf_object_with_symbols() {
     local text_section_off=$header_size
     local data_section_off=$((text_section_off + text_size))
     local rela_hex=""
-    if [[ ${#relocations_n[@]} -gt 0 ]]; then
-        generate_relocation_section "relocations_n" "labels_n" "data_labels_n" "rela_hex"
+        if [[ ${#relocations_n[@]} -gt 0 ]]; then
+        generate_relocation_section "relocations_n" "labels_n" "data_labels_n" "externals_n" "rela_hex"
     fi
     local rela_size=$((${#rela_hex} / 2))
     local total_sections=6
