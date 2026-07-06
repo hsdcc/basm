@@ -47,7 +47,10 @@ linker_relocate() {
             patches=$((patches + 1))
             ;;
         2)  # R_X86_64_PC32: 4-byte PC-relative LE
-            local val=$((faddr + addend - (vaddr_t + coff)))
+            # S + A - P where P = address of the displacement field.
+            # CPU adds displacement to RIP (address after instruction).
+            # RIP = vaddr_t + coff + 4 (4-byte field ends at next insn).
+            local val=$((faddr + addend - (vaddr_t + coff + 4)))
             # clamp to uint32
             local clamped=$(( (1 << 32) + (val % (1 << 32)) ))
             (( clamped = clamped % (1 << 32) ))

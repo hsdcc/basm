@@ -44,15 +44,18 @@ basm_assemble() {
     if ! second_pass text_ins; then
         return 1
     fi
+
+    # always generate ELF object first, then link for executable mode
     if [[ "$mode" == "obj" ]]; then
         generate_elf_object_with_symbols "$text_hex" "$data_bytes" "labels" "equs" "$outfile" "data_label_off" "relocations" "externals" "$mode"
     else
-        local header_hex
-        header_hex=$(build_elf_header $entry_vaddr $file_text_off $text_vaddr $data_size $file_data_off)
-        local text_size
-        text_size=$((${#text_hex} / 2))
-        data_size=$((${#data_bytes} / 2))
-        write_final_executable "$header_hex" "$text_hex" "$data_bytes" "$file_text_off" "$text_size" "$data_size" "$file_data_off" "$outfile"
+        local tmp_obj
+        tmp_obj="$(mktemp).o" || { error_msg "failed to create temp object"; return 1; }
+        generate_elf_object_with_symbols "$text_hex" "$data_bytes" "labels" "equs" "$tmp_obj" "data_label_off" "relocations" "externals" "obj"
+        link_objects "$tmp_obj" "$outfile"
+        local rc=$?
+        rm -f "$tmp_obj"
+        return $rc
     fi
     return 0
 }

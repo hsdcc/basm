@@ -335,12 +335,10 @@ second_pass() {
                 echo "unknown label $lbl" >&2
                 return 1
             fi
-            addr=$((data_vaddr + data_label_off[$lbl]))
             mod_rm=$(((regs[$reg] << 3) | 5))
             text_hex+=$(printf "488d%02x" $mod_rm)
-            
-            offset=$((addr - (text_vaddr + current_address + 7)))
-            text_hex+=$(u32le $offset)
+            relocations+=("$((current_address + 3)):${lbl}:2:0")
+            text_hex+="00000000"
             current_address=$((current_address + 7))
         elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
             op="${BASH_REMATCH[1]}"
