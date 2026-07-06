@@ -59,16 +59,18 @@ linker_collect() {
 
       # read section name from shstrtab
       local sname=""
-      local spos=$((sn * 2))
-      while ((spos + 1 < ${#shst_hex})); do
-        local sb="${shst_hex:$spos:2}"
-        [[ "$sb" == "00" ]] && break
-        local sv=$((16#$sb))
-        ((sv >= 32 && sv < 127)) && sname+=$(printf "\\$(printf '%03o' "$sv")")
-        spos=$((spos + 2))
-      done
-      [[ -z "$sname" ]] && continue
+      if (( sn >= 0 && sn * 2 + 1 < ${#shst_hex} )); then
+        local spos=$((sn * 2))
+        while ((spos + 1 < ${#shst_hex})); do
+          local sb="${shst_hex:$spos:2}"
+          [[ "$sb" == "00" ]] && break
+          local sv=$((16#$sb))
+          ((sv >= 32 && sv < 127)) && sname+=$(printf "\\$(printf '%03o' "$sv")")
+          spos=$((spos + 2))
+        done
+      fi
 
+      # match by name first, then by type for relocations (which may have no name)
       case "$sname" in
         .text)    read_file_hex "$f" "$so" "$ss" "text_hex"; text_sz=$ss ;;
         .data)    read_file_hex "$f" "$so" "$ss" "data_hex"; data_sz=$ss ;;
@@ -78,6 +80,14 @@ linker_collect() {
         .strtab)  str_off=$so; str_sz=$ss ;;
         .rela.text) rela_off=$so; rela_sz=$ss ;;
       esac
+
+      # also match by section type for sections without names
+      if [[ -z "$sname" ]]; then
+        case $st in
+          2) sym_off=$so; sym_sz=$ss ;;
+          4) rela_off=$so; rela_sz=$ss ;;
+        esac
+      fi
     done
 
     ctx["obj_${idx}_text_hex"]="$text_hex"

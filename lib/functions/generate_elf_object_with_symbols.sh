@@ -40,43 +40,35 @@ generate_elf_object_with_symbols() {
     local rela_size=$((${#rela_hex} / 2))
     local total_sections=6
     [[ $rela_size -gt 0 ]] && total_sections=7
+    # build strtab with ordered iteration for deterministic offsets
+    local -a _sym_names=()
+    local -a _sym_shndx=()
+    local -a _sym_vals=()
+    for label_name in "${!labels_n[@]}"; do
+        _sym_names+=("$label_name"); _sym_shndx+=(1); _sym_vals+=("${labels_n[$label_name]}")
+    done
+    for label_name in "${!data_labels_n[@]}"; do
+        _sym_names+=("$label_name"); _sym_shndx+=(2); _sym_vals+=("${data_labels_n[$label_name]}")
+    done
+    for ext_name in "${!externals_n[@]}"; do
+        _sym_names+=("$ext_name"); _sym_shndx+=(0); _sym_vals+=(0)
+    done
+    local -A _str_offsets=()
     local symstrtab_hex="00"
     local current_str_offset=1
-    for label_name in "${!labels_n[@]}"; do
-        for ((ci = 0; ci < ${#label_name}; ci++)); do
-            local ch="${label_name:$ci:1}"
+    local _si
+    for ((_si = 0; _si < ${#_sym_names[@]}; _si++)); do
+        local _nm="${_sym_names[$_si]}"
+        _str_offsets["$_nm"]=$current_str_offset
+        for ((ci = 0; ci < ${#_nm}; ci++)); do
+            local ch="${_nm:$ci:1}"
             symstrtab_hex+=$(printf "%02x" "'$ch")
         done
         symstrtab_hex+="00"
-        current_str_offset=$((current_str_offset + ${#label_name} + 1))
-    done
-    for label_name in "${!data_labels_n[@]}"; do
-        for ((ci = 0; ci < ${#label_name}; ci++)); do
-            local ch="${label_name:$ci:1}"
-            symstrtab_hex+=$(printf "%02x" "'$ch")
-        done
-        symstrtab_hex+="00"
-        current_str_offset=$((current_str_offset + ${#label_name} + 1))
-    done
-    for ext_name in "${!externals_n[@]}"; do
-        for ((ci = 0; ci < ${#ext_name}; ci++)); do
-            local ch="${ext_name:$ci:1}"
-            symstrtab_hex+=$(printf "%02x" "'$ch")
-        done
-        symstrtab_hex+="00"
-        current_str_offset=$((current_str_offset + ${#ext_name} + 1))
+        current_str_offset=$((current_str_offset + ${#_nm} + 1))
     done
     local symstrtab_size=$((${#symstrtab_hex} / 2))
-    local num_symbols=1
-    for label_name in "${!labels_n[@]}"; do
-        num_symbols=$((num_symbols + 1))
-    done
-    for label_name in "${!data_labels_n[@]}"; do
-        num_symbols=$((num_symbols + 1))
-    done
-    for ext_name in "${!externals_n[@]}"; do
-        num_symbols=$((num_symbols + 1))
-    done
+    local num_symbols=$((1 + ${#_sym_names[@]}))
     local symtab_size=$((num_symbols * 24))
     local shstrtab_hex="002e74657874002e64617461002e7368737472746162002e73796d746162002e73747274616200"
     local shstrtab_size=$((${#shstrtab_hex} / 2))
@@ -84,27 +76,22 @@ generate_elf_object_with_symbols() {
     local symtab_off=$((strtab_off + symstrtab_size))
     local rela_off=$((symtab_off + symtab_size))
     local sec_header_table_off=$((rela_off + rela_size))
-local elf_header=""
-    # Build ELF64 header step by step, counting bytes carefully
-    # Position 0-15: e_ident
-    elf_header="7f454c46"      # bytes 0-3: magic (4 bytes = 8 hex chars)
-    elf_header+="02"           # byte 4: ELFCLASS64 = 2 (1 byte)
-    elf_header+="01"           # byte 5: ELFDATA2LSB = 1 (1 byte)
-    elf_header+="01"           # byte 6: EV_CURRENT = 1 (1 byte)
-    elf_header+="00"           # byte 7: ELFOSABI_SYSV = 0
-    elf_header+="00"           # byte 8: ABI version = 0 
-    # Total so far: 4 + 1 + 1 + 1 + 1 + 1 = 9 bytes. Need 7 more to reach byte 16.
-    elf_header+="00000000000000"  # bytes 9-15: pad (7 bytes = 14 hex chars)
-    # Now at byte 16 (correct position for e_type)
+    local elf_header=""
+    elf_header="7f454c46"
+    elf_header+="02"
+    elf_header+="01"
+    elf_header+="01"
+    elf_header+="00"
+    elf_header+="00"
+    elf_header+="00000000000000"
     case "$mode" in
-        obj) elf_header+="0100" ;;   # ET_REL = 0x0001
-        *)   elf_header+="0200" ;;   # ET_EXEC = 0x0002
+        obj) elf_header+="0100" ;;
+        *)   elf_header+="0200" ;;
     esac
-    # Position 18-19: e_machine (x86_64 = 0x3E)
-    elf_header+="3e00"  # EM_X86_64 in little-endian
-    elf_header+="01000000"    # e_version = EV_CURRENT (1)
-    elf_header+="0000000000000000"  # e_entry = 0 (no entry for relocatable)
-    elf_header+="0000000000000000"  # e_phoff = 0 (no program headers)
+    elf_header+="3e00"
+    elf_header+="01000000"
+    elf_header+="0000000000000000"
+    elf_header+="0000000000000000"
     local shoff_hex=$(printf "%016x" $sec_header_table_off)
     elf_header+=$(reverse_endian "$shoff_hex")
     elf_header+="00000000"
@@ -116,87 +103,32 @@ local elf_header=""
     elf_header+=$(reverse_endian "$shnum_hex")
     local shstrndx_hex=$(printf "%04x" 3)
     elf_header+=$(reverse_endian "$shstrndx_hex")
+    # build symtab using ordered _sym_names arrays
     local symtab_content=""
     for ((i = 0; i < 24; i++)); do
         symtab_content+="00"
     done
-    local sym_idx=1
-    for label_name in "${!labels_n[@]}"; do
-        local label_off=${labels_n[$label_name]}
-        local str_offset=1
-        local temp_str=$'\0'
-        local found=0
-        for temp_label in "${!labels_n[@]}"; do
-            [[ "$temp_label" == "$label_name" ]] && { found=1; break; }
-            temp_str+="$temp_label"
-            temp_str+=$'\0'
-            str_offset=$((str_offset + ${#temp_label} + 1))
-        done
-        for temp_label in "${!data_labels_n[@]}"; do
-            temp_str+="$temp_label"
-            temp_str+=$'\0'
-            str_offset=$((str_offset + ${#temp_label} + 1))
-        done
-        local st_name_hex=$(printf "%08x" $str_offset)
+    local _si2
+    for ((_si2 = 0; _si2 < ${#_sym_names[@]}; _si2++)); do
+        local nm="${_sym_names[$_si2]}"
+        local shndx="${_sym_shndx[$_si2]}"
+        local val="${_sym_vals[$_si2]}"
+        local stroff=${_str_offsets["$nm"]}
+        local st_name_hex=$(printf "%08x" $stroff)
         symtab_content+=$(reverse_endian "$st_name_hex")
         symtab_content+="10"
         symtab_content+="00"
-        local shndx_hex=$(printf "%04x" 1)
+        local shndx_hex=$(printf "%04x" $shndx)
         symtab_content+=$(reverse_endian "$shndx_hex")
-        local value_hex=$(printf "%016x" $label_off)
-        symtab_content+=$(reverse_endian "$value_hex")
+        if (( shndx > 0 )); then
+            local value_hex=$(printf "%016x" $val)
+            symtab_content+=$(reverse_endian "$value_hex")
+        else
+            symtab_content+="0000000000000000"
+        fi
         symtab_content+="0000000000000000"
-        sym_idx=$((sym_idx + 1))
     done
-    for label_name in "${!data_labels_n[@]}"; do
-        local label_off=${data_labels_n[$label_name]}
-        local str_offset=1
-        local temp_str=$'\0'
-        local found=0
-        for temp_label in "${!labels_n[@]}"; do
-            temp_str+="$temp_label"
-            temp_str+=$'\0'
-            str_offset=$((str_offset + ${#temp_label} + 1))
-        done
-        for temp_label in "${!data_labels_n[@]}"; do
-            [[ "$temp_label" == "$label_name" ]] && { found=1; break; }
-            temp_str+="$temp_label"
-            temp_str+=$'\0'
-            str_offset=$((str_offset + ${#temp_label} + 1))
-        done
-        local st_name_hex=$(printf "%08x" $str_offset)
-        symtab_content+=$(reverse_endian "$st_name_hex")
-        symtab_content+="10"
-        symtab_content+="00"
-        local shndx_hex=$(printf "%04x" 2)
-        symtab_content+=$(reverse_endian "$shndx_hex")
-        local value_hex=$(printf "%016x" $label_off)
-        symtab_content+=$(reverse_endian "$value_hex")
-        symtab_content+="0000000000000000"
-        sym_idx=$((sym_idx + 1))
-    done
-    for ext_name in "${!externals_n[@]}"; do
-        local str_offset=1
-        for temp_label in "${!labels_n[@]}"; do
-            str_offset=$((str_offset + ${#temp_label} + 1))
-        done
-        for temp_label in "${!data_labels_n[@]}"; do
-            str_offset=$((str_offset + ${#temp_label} + 1))
-        done
-        for temp_label in "${!externals_n[@]}"; do
-            [[ "$temp_label" == "$ext_name" ]] && break
-            str_offset=$((str_offset + ${#temp_label} + 1))
-        done
-        local st_name_hex=$(printf "%08x" $str_offset)
-        symtab_content+=$(reverse_endian "$st_name_hex")
-        symtab_content+="10"
-        symtab_content+="00"
-        local shndx_hex=$(printf "%04x" 0)
-        symtab_content+=$(reverse_endian "$shndx_hex")
-        symtab_content+="0000000000000000"
-        symtab_content+="0000000000000000"
-        sym_idx=$((sym_idx + 1))
-    done
+    # build section headers
     local section_headers=""
     for ((i = 0; i < 64; i++)); do
         section_headers+="00"
