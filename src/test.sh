@@ -834,12 +834,16 @@ else
   # get unique flag strings (R E, RW, R, etc)
   seg_flags=$(echo "$readelf_out" | grep -oP 'R\s*E|RW|R\s+' | sort -u | tr '\n' ' ')
   text_has_re=$(echo "$seg_flags" | grep -q 'R E' && echo 1 || echo 0)
+  rodata_has_r=$(echo "$seg_flags" | grep -qP '\bR\s{2,}' && echo 1 || echo 0)
   data_has_rw=$(echo "$seg_flags" | grep -q 'RW' && echo 1 || echo 0)
-  if (( seg_count != 2 )); then
-    echo "	[FAIL] linking_segment_perms: expected 2 LOAD segments, got $seg_count"
+  if (( seg_count != 3 )); then
+    echo "	[FAIL] linking_segment_perms: expected 3 LOAD segments, got $seg_count"
     failed_tests=$((failed_tests + 1))
   elif (( text_has_re != 1 )); then
     echo "	[FAIL] linking_segment_perms: missing RE segment (got $seg_flags)"
+    failed_tests=$((failed_tests + 1))
+  elif (( rodata_has_r != 1 )); then
+    echo "	[FAIL] linking_segment_perms: missing R segment (got $seg_flags)"
     failed_tests=$((failed_tests + 1))
   elif (( data_has_rw != 1 )); then
     echo "	[FAIL] linking_segment_perms: missing RW segment (got $seg_flags)"

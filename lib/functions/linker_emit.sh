@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 
-# Phase 5: write final executable with two PT_LOAD segments
+# Phase 5: write final executable with three PT_LOAD segments
 #   segment 1: text (r-x, PF_R|PF_X=5)
-#   segment 2: data+rodata+bss (rw-, PF_R|PF_W=6)
+#   segment 2: rodata (r--, PF_R=4)
+#   segment 3: data+bss (rw-, PF_R|PF_W=6)
 # Since base_vaddr=0x400000 is page-aligned and all vaddrs are
 # base + file_offset, congruence holds automatically.
 linker_emit() {
@@ -29,16 +30,21 @@ linker_emit() {
   local vaddr_d="${ctx[data_vaddr]:-0}"
   local entry="${ctx[entry_vaddr]:-$vaddr_t}"
 
+  local rodata_vaddr="${ctx[rodata_vaddr]:-0}"
+  local file_rodata_off="${ctx[file_rodata_off]:-0}"
+  local rodata_filesz=$a_r
+
   # segment sizes
   local text_filesz=$a_t
-  local data_filesz=$((a_d + a_r))
+  local data_filesz=$a_d
   local data_memsz=$((data_filesz + bss_sz))
 
-  # build ELF header with two PT_LOAD segments
+  # build ELF header with three PT_LOAD segments
   local hdr
-  hdr=$(build_elf_header_multi "$entry" \
-        "$f_off_t" "$vaddr_t" "$text_filesz" \
-        "$f_off_d" "$vaddr_d" "$data_filesz" "$data_memsz")
+  hdr=$(build_elf_header "$entry" \
+        "$f_off_t" "$vaddr_t" "$a_t" \
+        "$vaddr_d" "$f_off_d" "$data_filesz" "$data_memsz" \
+        "$rodata_vaddr" "$file_rodata_off" "$rodata_filesz")
 
   # create temp file
   local tmpf
