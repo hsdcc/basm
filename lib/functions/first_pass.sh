@@ -299,7 +299,7 @@ first_pass_ins_size() {
     line="${BASH_REMATCH[2]}"
   fi
 
-  if [[ "$line" =~ ^mov[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil),[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil)$ ]]; then
+  if [[ "$line" =~ ^mov[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil|r[89]|r1[0-5]|r[89]b|r1[0-5]b),[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil|r[89]|r1[0-5]|r[89]b|r1[0-5]b)$ ]]; then
     local mv_reg1="${BASH_REMATCH[1]}"
     local mv_reg2="${BASH_REMATCH[2]}"
     if (($(get_reg_num "$mv_reg1") >= 0 && $(get_reg_num "$mv_reg2") >= 0)); then
@@ -310,7 +310,7 @@ first_pass_ins_size() {
       return 1
     fi
 
-  elif [[ "$line" =~ ^mov[[:space:]]+\[([^]]+)\],[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil)$ ]]; then
+  elif [[ "$line" =~ ^mov[[:space:]]+\[([^]]+)\],[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil|r[89]|r1[0-5]|r[89]b|r1[0-5]b)$ ]]; then
     local mem="${BASH_REMATCH[1]}"
     local ms_src="${BASH_REMATCH[2]}"
     local ms_size=$(calc_mem_operand_size "$mem")
@@ -318,7 +318,7 @@ first_pass_ins_size() {
     [[ -z "$ms_rex" ]] && ms_size=$((ms_size - 1))
     text_bytes_len=$((text_bytes_len + ms_size))
 
-  elif [[ "$line" =~ ^mov[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil),[[:space:]]+\[([^]]+)\]$ ]]; then
+  elif [[ "$line" =~ ^mov[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil|r[89]|r1[0-5]|r[89]b|r1[0-5]b),[[:space:]]+\[([^]]+)\]$ ]]; then
     local mem="${BASH_REMATCH[2]}"
     local ml_dst="${BASH_REMATCH[1]}"
     local ml_size=$(calc_mem_operand_size "$mem")
@@ -329,7 +329,7 @@ first_pass_ins_size() {
   elif [[ "$line" =~ $cmov_pattern ]]; then
     text_bytes_len=$((text_bytes_len + 4))
 
-  elif [[ "$line" =~ ^mov[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil),[[:space:]]+(.*)$ ]]; then
+  elif [[ "$line" =~ ^mov[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil|r[89]|r1[0-5]|r[89]b|r1[0-5]b),[[:space:]]+(.*)$ ]]; then
     calculate_mov_size
 
   elif [[ "$line" =~ ^(syscall|nop|ret|leave|cqo|cdqe)$ ]]; then
@@ -340,13 +340,19 @@ first_pass_ins_size() {
       movsw | movsq | stosw | stosq | lodsw | lodsq | scasw | scasq | cmpsw | cmpsq) text_bytes_len=$((text_bytes_len + 2)) ;;
     esac
 
-  elif [[ "$line" =~ ^xor[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
+  elif [[ "$line" =~ ^xor[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5]),[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5])$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
     local xr_reg="${BASH_REMATCH[1]}"
     local xr_rex=$(get_rex_for_reg "$xr_reg")
     text_bytes_len=$((text_bytes_len + 2 + ${#xr_rex} / 2))
 
-  elif [[ "$line" =~ ^(push|pop)[[:space:]]+([er][a-z]{2})$ ]]; then
-    text_bytes_len=$((text_bytes_len + 1))
+  elif [[ "$line" =~ ^(push|pop)[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5])$ ]]; then
+    local pp_reg="${BASH_REMATCH[2]}"
+    local pp_num=${regs[$pp_reg]:--1}
+    if (( pp_num >= 8 )); then
+      text_bytes_len=$((text_bytes_len + 2))
+    else
+      text_bytes_len=$((text_bytes_len + 1))
+    fi
 
   elif [[ "$line" =~ $push_imm_pattern ]]; then
     arg="${BASH_REMATCH[1]}"
@@ -382,12 +388,16 @@ first_pass_ins_size() {
     local psize=$(calc_mem_operand_size "$pmem")
     text_bytes_len=$((text_bytes_len + psize))
 
-  elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
+  elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5]),[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5])$ ]]; then
     local ar_reg="${BASH_REMATCH[2]}"
-    local ar_rex=$(get_rex_for_reg "$ar_reg")
+    local ar_reg2="${BASH_REMATCH[3]}"
+    local ar_num1=$(get_reg_num "$ar_reg")
+    local ar_num2=$(get_reg_num "$ar_reg2")
+    local ar_w=$(( $(get_reg_size "$ar_reg") == 8 ? 1 : 0 ))
+    local ar_rex=$(get_rex_bits "$ar_num2" "$ar_num1" "$ar_w")
     text_bytes_len=$((text_bytes_len + 2 + ${#ar_rex} / 2))
 
-  elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+([er][a-z]{2}),[[:space:]]*(.*)$ ]]; then
+  elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5]),[[:space:]]*(.*)$ ]]; then
     calculate_arith_ri_size
 
   elif [[ "$line" =~ $arith_mem_imm_pattern ]]; then
@@ -433,7 +443,7 @@ first_pass_ins_size() {
   elif [[ "$line" =~ ^(loop|loope|loopne)[[:space:]]+(.*)$ ]]; then
     text_bytes_len=$((text_bytes_len + 2))
 
-  elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+([er][a-z]{2})$ ]]; then
+  elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5])$ ]]; then
     local un_reg="${BASH_REMATCH[2]}"
     local un_rex=$(get_rex_for_reg "$un_reg")
     text_bytes_len=$((text_bytes_len + 2 + ${#un_rex} / 2))
@@ -443,12 +453,12 @@ first_pass_ins_size() {
     local umsize=$(calc_mem_operand_size "$umem")
     text_bytes_len=$((text_bytes_len + umsize))
 
-  elif [[ "$line" =~ ^call[[:space:]]+([er][a-z]{2})$ ]]; then
+  elif [[ "$line" =~ ^call[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5])$ ]]; then
     text_bytes_len=$((text_bytes_len + 2))
   elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
     text_bytes_len=$((text_bytes_len + 5))
 
-  elif [[ "$line" =~ ^(mul|div|idiv)[[:space:]]+([er][a-z]{2})$ ]]; then
+  elif [[ "$line" =~ ^(mul|div|idiv)[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5])$ ]]; then
     local mu_reg="${BASH_REMATCH[2]}"
     local mu_rex=$(get_rex_for_reg "$mu_reg")
     text_bytes_len=$((text_bytes_len + 2 + ${#mu_rex} / 2))
@@ -458,7 +468,7 @@ first_pass_ins_size() {
     local msize=$(calc_mem_operand_size "$mmem")
     text_bytes_len=$((text_bytes_len + msize))
 
-  elif [[ "$line" =~ ^(imul)[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
+  elif [[ "$line" =~ ^(imul)[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5]),[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5])$ ]]; then
     local im_reg="${BASH_REMATCH[2]}"
     local im_rex=$(get_rex_for_reg "$im_reg")
     text_bytes_len=$((text_bytes_len + 3 + ${#im_rex} / 2))
@@ -471,7 +481,7 @@ first_pass_ins_size() {
   elif [[ "$line" =~ $imul3_pattern ]]; then
     local i3src="${BASH_REMATCH[2]}"
     local i3imm="${BASH_REMATCH[3]}"
-    if [[ "$i3src" =~ ^[er][a-z]{2}$ ]]; then
+    if [[ "$i3src" =~ ^([er][a-z]{2}|r[89]|r1[0-5])$ ]]; then
       local i3val=0
       [[ "$i3imm" =~ ^-?[0-9]+$ ]] && i3val=$((i3imm))
       if ((i3val >= -128 && i3val <= 127)); then
@@ -493,7 +503,7 @@ first_pass_ins_size() {
       fi
     fi
 
-  elif [[ "$line" =~ ^lea[[:space:]]+([er][a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
+  elif [[ "$line" =~ ^lea[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5]),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
     local l_lbl2="${BASH_REMATCH[2]}"
     local l_lbl2_num=$(get_reg_num "$l_lbl2")
     if ((l_lbl2_num >= 0)); then
@@ -508,7 +518,7 @@ first_pass_ins_size() {
     local lea_size=$(calc_mem_operand_size "$lea_mem")
     text_bytes_len=$((text_bytes_len + lea_size))
 
-  elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+([er][a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
+  elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5]),[[:space:]]+([0-9]+)$ ]]; then
     local sh_reg="${BASH_REMATCH[2]}"
     local sh_rex=$(get_rex_for_reg "$sh_reg")
     text_bytes_len=$((text_bytes_len + 3 + ${#sh_rex} / 2))
@@ -518,30 +528,30 @@ first_pass_ins_size() {
     local smsize=$(calc_mem_operand_size "$smem")
     text_bytes_len=$((text_bytes_len + smsize + 1))
 
-  elif [[ "$line" =~ ^test[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
+  elif [[ "$line" =~ ^test[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5]),[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5])$ ]]; then
     local tt_reg="${BASH_REMATCH[1]}"
     local tt_rex=$(get_rex_for_reg "$tt_reg")
     text_bytes_len=$((text_bytes_len + 2 + ${#tt_rex} / 2))
 
-  elif [[ "$line" =~ ^test[[:space:]]+([er][a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
+  elif [[ "$line" =~ ^test[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5]),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
     text_bytes_len=$((text_bytes_len + 7))
 
-  elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+([er][a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh]|dil|sil|bpl|spl)$ ]]; then
+  elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5]),[[:space:]]+([ab][lh]|[cd][lh]|dil|sil|bpl|spl|r[89]b|r1[0-5]b)$ ]]; then
     local zx_reg="${BASH_REMATCH[2]}"
     local zx_rex=$(get_rex_for_reg "$zx_reg")
     text_bytes_len=$((text_bytes_len + 3 + ${#zx_rex} / 2))
 
-  elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
+  elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5]),[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5])$ ]]; then
     local zx2_reg="${BASH_REMATCH[2]}"
     local zx2_rex=$(get_rex_for_reg "$zx2_reg")
     text_bytes_len=$((text_bytes_len + 3 + ${#zx2_rex} / 2))
 
-  elif [[ "$line" =~ ^movsxd[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
+  elif [[ "$line" =~ ^movsxd[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5]),[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5])$ ]]; then
     local ms_reg="${BASH_REMATCH[1]}"
     local ms_rex=$(get_rex_for_reg "$ms_reg")
     text_bytes_len=$((text_bytes_len + 2 + ${#ms_rex} / 2))
 
-  elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|dil|sil|bpl|spl|[er][a-z]{2})$ ]]; then
+  elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|dil|sil|bpl|spl|r[89]b|r1[0-5]b|[er][a-z]{2}|r[89]|r1[0-5])$ ]]; then
     text_bytes_len=$((text_bytes_len + 3))
 
   elif [[ "$line" =~ $movss_rr_pattern ]]; then

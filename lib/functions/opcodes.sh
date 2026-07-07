@@ -50,6 +50,12 @@ regs["edi"]=7
     regs["bpl"]=5
     regs["sil"]=6
     regs["dil"]=7
+    regs["r8"]=8;  regs["r9"]=9;  regs["r10"]=10; regs["r11"]=11
+    regs["r12"]=12; regs["r13"]=13; regs["r14"]=14; regs["r15"]=15
+    regs["r8d"]=8;  regs["r9d"]=9;  regs["r10d"]=10; regs["r11d"]=11
+    regs["r12d"]=12; regs["r13d"]=13; regs["r14d"]=14; regs["r15d"]=15
+    regs["r8b"]=8;  regs["r9b"]=9;  regs["r10b"]=10; regs["r11b"]=11
+    regs["r12b"]=12; regs["r13b"]=13; regs["r14b"]=14; regs["r15b"]=15
 declare -A xmm_regs
 xmm_regs["xmm0"]=0
 xmm_regs["xmm1"]=1
