@@ -1021,6 +1021,12 @@ second_pass() {
                 text_hex+="${rex}69$(printf "%02x" $imod)"$(u32le $ival)
                 current_address=$((current_address + 6 + ${#rex}/2))
             fi
+        elif [[ "$line" =~ ^@align[[:space:]]+([0-9]+)$ ]]; then
+            local align_n="${BASH_REMATCH[1]}"
+            local aligned=$(( (current_address + align_n - 1) / align_n * align_n ))
+            local pad=$((aligned - current_address))
+            while ((pad-- > 0)); do text_hex+="90"; done
+            current_address=$aligned
         else
             error_msg "internal error assembling: $line"
             return 1
