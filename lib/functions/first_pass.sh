@@ -474,7 +474,7 @@ first_pass() {
                 local mmi_immval=0
                 [[ "$mmi_imm" =~ ^-?[0-9]+$ ]] && mmi_immval=$((mmi_imm))
                 [[ "$mmi_imm" =~ ^0x([0-9a-fA-F]+)$ ]] && mmi_immval=$((16#${BASH_REMATCH[1]}))
-                if (( mmi_immval >= -128 && mmi_immval <= 127 )) && [[ "$mmi_size_kw" != "dword" ]]; then
+                if [[ "$mmi_size_kw" == "byte " ]]; then
                     text_bytes_len=$((text_bytes_len + mmi_addrsize + 2))
                 else
                     text_bytes_len=$((text_bytes_len + mmi_addrsize + 5))
