@@ -72,3 +72,5 @@ movsxd_mem_pattern='^(movsxd)[[:space:]]+([er][a-z]{2}),[[:space:]]+\[([^]]+)\]$
 
 movzx_word_mem_pattern='^(movzx)[[:space:]]+([er][a-z]{2}),[[:space:]]+(word[[:space:]]+)?\[([^]]+)\]$'
 movsx_word_mem_pattern='^(movsx)[[:space:]]+([er][a-z]{2}),[[:space:]]+(word[[:space:]]+)?\[([^]]+)\]$'
+
+align_pattern='^\.(align|balign|p2align)[[:space:]]+([0-9]+)$'

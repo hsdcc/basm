@@ -65,12 +65,24 @@ first_pass() {
         IFS=',' read -ra ext_syms <<<"$ext_list"
         for ext_sym in "${ext_syms[@]}"; do
           ext_sym=$(trim_string "$ext_sym")
+          ext_sym="${ext_sym%%:*}"
           [[ -n "$ext_sym" ]] && externals["$ext_sym"]=1
         done
         continue
         ;;
     esac
     if [[ "$in_section" == "data" ]]; then
+      if [[ "$line" =~ $align_pattern ]]; then
+        local align_type="${BASH_REMATCH[1]}"
+        local align_n="${BASH_REMATCH[2]}"
+        [[ "$align_type" == "p2align" ]] && align_n=$((1 << align_n))
+        ((align_n <= 1)) && continue
+        local cur_size=$((${#data_bytes} / 2))
+        local aligned=$(( (cur_size + align_n - 1) / align_n * align_n ))
+        local pad=$((aligned - cur_size))
+        while ((pad-- > 0)); do data_bytes+="00"; done
+        continue
+      fi
       if [[ "$line" =~ $equ_pattern ]]; then
         name="${BASH_REMATCH[1]}"
         ref="${BASH_REMATCH[2]}"
@@ -122,6 +134,17 @@ first_pass() {
       error_msg "at line $line_number: unsupported data line format: '$line'"
       return 1
     elif [[ "$in_section" == "rodata" ]]; then
+      if [[ "$line" =~ $align_pattern ]]; then
+        local align_type="${BASH_REMATCH[1]}"
+        local align_n="${BASH_REMATCH[2]}"
+        [[ "$align_type" == "p2align" ]] && align_n=$((1 << align_n))
+        ((align_n <= 1)) && continue
+        local cur_size=$((${#rodata_bytes} / 2))
+        local aligned=$(( (cur_size + align_n - 1) / align_n * align_n ))
+        local pad=$((aligned - cur_size))
+        while ((pad-- > 0)); do rodata_bytes+="00"; done
+        continue
+      fi
       if [[ "$line" =~ $db_pattern ]]; then
         name="${BASH_REMATCH[1]}"
         txt="${BASH_REMATCH[2]}"
@@ -179,9 +202,59 @@ first_pass() {
         bss_bytes+=$(generate_zeros $val)
         continue
       fi
+      if [[ "$line" =~ $resb_pattern ]]; then
+        name="${BASH_REMATCH[1]}"
+        val="${BASH_REMATCH[2]}"
+        declare -gA bss_label_off
+        bss_label_off["$name"]=$((${#bss_bytes} / 2))
+        bss_bytes_len=$((bss_bytes_len + val))
+        bss_bytes+=$(generate_zeros $val)
+        continue
+      fi
+      if [[ "$line" =~ $resw_pattern ]]; then
+        name="${BASH_REMATCH[1]}"
+        val="${BASH_REMATCH[2]}"
+        declare -gA bss_label_off
+        bss_label_off["$name"]=$((${#bss_bytes} / 2))
+        total=$((val * 2))
+        bss_bytes_len=$((bss_bytes_len + total))
+        bss_bytes+=$(generate_zeros $total)
+        continue
+      fi
+      if [[ "$line" =~ $resd_pattern ]]; then
+        name="${BASH_REMATCH[1]}"
+        val="${BASH_REMATCH[2]}"
+        declare -gA bss_label_off
+        bss_label_off["$name"]=$((${#bss_bytes} / 2))
+        total=$((val * 4))
+        bss_bytes_len=$((bss_bytes_len + total))
+        bss_bytes+=$(generate_zeros $total)
+        continue
+      fi
+      if [[ "$line" =~ $resq_pattern ]]; then
+        name="${BASH_REMATCH[1]}"
+        val="${BASH_REMATCH[2]}"
+        declare -gA bss_label_off
+        bss_label_off["$name"]=$((${#bss_bytes} / 2))
+        total=$((val * 8))
+        bss_bytes_len=$((bss_bytes_len + total))
+        bss_bytes+=$(generate_zeros $total)
+        continue
+      fi
       error_msg "at line $line_number: unsupported bss line format: '$line'"
       return 1
     elif [[ "$in_section" == "text" ]]; then
+      # Handle alignment directives
+      if [[ "$line" =~ $align_pattern ]]; then
+        local align_type="${BASH_REMATCH[1]}"
+        local align_n="${BASH_REMATCH[2]}"
+        [[ "$align_type" == "p2align" ]] && align_n=$((1 << align_n))
+        ((align_n <= 1)) && continue
+        local aligned=$(( (text_bytes_len + align_n - 1) / align_n * align_n ))
+        text_bytes_len=$aligned
+        text_ins+=("@align $align_n")
+        continue
+      fi
       # Handle times directive
       if [[ "$line" =~ ^times[[:space:]]+([0-9]+)[[:space:]]+(.*)$ ]]; then
         local tcount="${BASH_REMATCH[1]}"
