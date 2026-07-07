@@ -38,7 +38,7 @@ calc_mem_addr_size() {
     local disp="$2"
     
     local size=4
-    if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+    if [[ "$base" == "rsp" || "$base" == "r12" || "$base" == "esp" ]]; then
         if [[ -z "$disp" ]]; then
             size=3
         else
@@ -51,7 +51,7 @@ calc_mem_addr_size() {
     else
         if [[ -z "$disp" ]]; then
             size=3
-        elif [[ "$base" == "rbp" || "$base" == "r13" ]]; then
+        elif [[ "$base" == "rbp" || "$base" == "r13" || "$base" == "ebp" ]]; then
             size=4
         else
             if (( disp >= -128 && disp <= 127 )); then

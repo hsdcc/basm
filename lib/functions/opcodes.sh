@@ -30,6 +30,14 @@ regs["rsp"]=4
 regs["rbp"]=5
 regs["rsi"]=6
 regs["rdi"]=7
+regs["eax"]=0
+regs["ecx"]=1
+regs["edx"]=2
+regs["ebx"]=3
+regs["esp"]=4
+regs["ebp"]=5
+regs["esi"]=6
+regs["edi"]=7
 declare -A xmm_regs
 xmm_regs["xmm0"]=0
 xmm_regs["xmm1"]=1

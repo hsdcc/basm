@@ -222,7 +222,7 @@ assemble_mem_operand() {
         
         if (( disp == 0 )); then
             mod=0
-            if [[ "$base_reg" == "rbp" || "$base_reg" == "r13" ]]; then
+            if [[ "$base_reg" == "rbp" || "$base_reg" == "r13" || "$base_reg" == "ebp" ]]; then
                 mod=1
                 disp_hex="00"
             fi
@@ -234,7 +234,7 @@ assemble_mem_operand() {
             disp_hex=$(u32le "$disp")
         fi
         rm=${regs[$base_reg]}
-        if [[ "$base_reg" == "rsp" || "$base_reg" == "r12" ]]; then
+        if [[ "$base_reg" == "rsp" || "$base_reg" == "r12" || "$base_reg" == "esp" ]]; then
             rm=4 
             sib="24" 
         fi
