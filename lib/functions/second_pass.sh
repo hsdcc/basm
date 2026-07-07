@@ -8,6 +8,7 @@ second_pass() {
     
     for line in "${ins_array[@]}"; do
         
+        if [[ "$line" == "lea rsi, [msg]" ]]; then echo "DEBUG: found lea!" >&2; fi
         if [[ "$line" =~ $movss_rr_pattern ]]; then
             handle_fp_operation "movss_rr" 4
         elif [[ "$line" =~ $movsd_rr_pattern ]]; then
