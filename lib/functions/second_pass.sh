@@ -164,6 +164,31 @@ second_pass() {
                 mod_rm=$((0xc0 + regs[$src] * 8 + regs[$dst]))
                 text_hex+=$(printf "4889%02x" "$mod_rm")
                 current_address=$((current_address + 3))
+            elif [[ "$src" =~ ^(-?[0-9]+|0x[0-9a-fA-F]+)$ && "$dst" =~ \[.*\]$ ]]; then
+                
+                local mmi_val=0
+                if [[ "$src" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+                    mmi_val=$((16#${BASH_REMATCH[1]}))
+                else
+                    mmi_val=$((src))
+                fi
+                local mmi_mem_op="$dst"
+                local mmi_opcode="48c7"
+                if [[ "$dst" =~ ^byte[[:space:]]+\[ ]]; then
+                    mmi_opcode="c6"
+                elif [[ "$dst" =~ ^dword[[:space:]]+\[ ]]; then
+                    mmi_opcode="c7"
+                fi
+                local mmi_hex=$(assemble_mem_operand "$mmi_mem_op" 0 "$mmi_opcode")
+                text_hex+=$mmi_hex
+                current_address=$((current_address + ${#mmi_hex}/2))
+                if [[ "$mmi_opcode" == "c6" ]]; then
+                    text_hex+=$(printf "%02x" $((mmi_val & 0xff)))
+                    current_address=$((current_address + 1))
+                else
+                    text_hex+=$(u32le $mmi_val)
+                    current_address=$((current_address + 4))
+                fi
             elif [[ "$dst" =~ ^\[.*\]$ ]]; then 
                 hex_code=$(assemble_mem_operand "$dst" "${regs[$src]}" "4889")
                 text_hex+=$hex_code
@@ -729,37 +754,6 @@ second_pass() {
             local lhex=$(assemble_mem_operand "$lmem_op" "${regs[$lreg]}" "488d")
             text_hex+=$lhex
             current_address=$((current_address + ${#lhex}/2))
-        elif [[ "$line" =~ $mov_mem_imm_pattern ]]; then
-            local mmi_size_kw="${BASH_REMATCH[1]}"
-            local mmi_base="${BASH_REMATCH[2]}"
-            local mmi_disp="${BASH_REMATCH[3]:-}"
-            local mmi_imm="${BASH_REMATCH[4]}"
-            local mmi_val=0
-            if [[ "$mmi_imm" =~ ^0x([0-9a-fA-F]+)$ ]]; then
-                mmi_val=$((16#${BASH_REMATCH[1]}))
-            else
-                mmi_val=$((mmi_imm))
-            fi
-            local mmi_mem_op="[$mmi_base$mmi_disp]"
-            local mmi_opcode="48c7"
-            local mmi_imm_size=4
-            if [[ "$mmi_size_kw" == "byte " ]]; then
-                mmi_opcode="c6"
-                mmi_imm_size=1
-            elif [[ "$mmi_size_kw" == "dword " ]]; then
-                mmi_opcode="c7"
-                mmi_imm_size=4
-            elif (( mmi_val >= -128 && mmi_val <= 127 )); then
-                mmi_opcode="48c7"
-                mmi_imm_size=4
-            fi
-            local mmi_hex=$(assemble_mem_operand "$mmi_mem_op" 0 "$mmi_opcode")
-            if (( mmi_imm_size == 1 )); then
-                text_hex+=$mmi_hex$(printf "%02x" $((mmi_val & 0xff)))
-            else
-                text_hex+=$mmi_hex$(u32le $mmi_val)
-            fi
-            current_address=$((current_address + ${#mmi_hex}/2 + mmi_imm_size))
         elif [[ "$line" =~ $shift_cl_pattern ]]; then
             local scl_op="${BASH_REMATCH[1]}"
             local scl_reg="${BASH_REMATCH[2]}"
