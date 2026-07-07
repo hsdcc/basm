@@ -73,19 +73,25 @@ calc_mem_addr_size() {
     fi
     echo $size
 }
+# SIB-aware memory operand size: accepts content of [ ], e.g., "rbx" or "rbx+rcx*4+16"
+calc_mem_operand_size() {
+    local mem_content="$1"
+    local rex_prefix="${2:-1}"
+    calc_mem_encoding_size "$mem_content" "$rex_prefix"
+}
 calculate_mov_size() {
     local dest_reg="${BASH_REMATCH[1]}"
     local dreg_num=$(get_reg_num "$dest_reg")
     arg="${BASH_REMATCH[2]}"
-    if [[ "$arg" =~ ^\[([er][a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
-        base="${BASH_REMATCH[1]}"
-        disp="${BASH_REMATCH[2]:-}"
-        size=$(calc_mem_addr_size "$base" "$disp")
+    if [[ "$arg" =~ ^\[([^]]+)\]$ ]]; then
+        # Memory operand: full content (possibly SIB)
+        local mem="${BASH_REMATCH[1]}"
+        local size=$(calc_mem_operand_size "$mem")
         text_bytes_len=$((text_bytes_len + size))
-    elif [[ "$arg" =~ ^\[([er][a-z]{2})([\+\-][0-9]+)?\],[[:space:]]+([er][a-z]{2})$ ]]; then
-        base="${BASH_REMATCH[1]}"
-        disp="${BASH_REMATCH[2]:-}"
-        size=$(calc_mem_addr_size "$base" "$disp")
+    elif [[ "$arg" =~ ^\[([^]]+)\],[[:space:]]+([er][a-z]{2})$ ]]; then
+        # [mem], reg
+        local mem="${BASH_REMATCH[1]}"
+        local size=$(calc_mem_operand_size "$mem")
         text_bytes_len=$((text_bytes_len + size))
     elif [[ "$arg" =~ ^[0-9]+$ ]] || [[ "$arg" =~ ^-?[0-9]+$ ]] || [[ "$arg" =~ ^0x[0-9a-fA-F]+$ ]] || [[ -n "${equs[$arg]:-}" ]]; then
         if (( dreg_num >= 0 && $(get_reg_size "$dest_reg") == 1 )); then
