@@ -197,7 +197,7 @@ first_pass() {
         fi
 
         declare -gA bss_label_off
-        bss_label_off["$name"]=$((${#bss_bytes} / 2))
+        bss_label_off["$name"]=$bss_bytes_len
         bss_bytes_len=$((bss_bytes_len + val))
         bss_bytes+=$(generate_zeros $val)
         continue
@@ -206,7 +206,7 @@ first_pass() {
         name="${BASH_REMATCH[1]}"
         val="${BASH_REMATCH[2]}"
         declare -gA bss_label_off
-        bss_label_off["$name"]=$((${#bss_bytes} / 2))
+        bss_label_off["$name"]=$bss_bytes_len
         bss_bytes_len=$((bss_bytes_len + val))
         bss_bytes+=$(generate_zeros $val)
         continue
@@ -215,7 +215,7 @@ first_pass() {
         name="${BASH_REMATCH[1]}"
         val="${BASH_REMATCH[2]}"
         declare -gA bss_label_off
-        bss_label_off["$name"]=$((${#bss_bytes} / 2))
+        bss_label_off["$name"]=$bss_bytes_len
         total=$((val * 2))
         bss_bytes_len=$((bss_bytes_len + total))
         bss_bytes+=$(generate_zeros $total)
@@ -225,7 +225,7 @@ first_pass() {
         name="${BASH_REMATCH[1]}"
         val="${BASH_REMATCH[2]}"
         declare -gA bss_label_off
-        bss_label_off["$name"]=$((${#bss_bytes} / 2))
+        bss_label_off["$name"]=$bss_bytes_len
         total=$((val * 4))
         bss_bytes_len=$((bss_bytes_len + total))
         bss_bytes+=$(generate_zeros $total)
@@ -235,7 +235,7 @@ first_pass() {
         name="${BASH_REMATCH[1]}"
         val="${BASH_REMATCH[2]}"
         declare -gA bss_label_off
-        bss_label_off["$name"]=$((${#bss_bytes} / 2))
+        bss_label_off["$name"]=$bss_bytes_len
         total=$((val * 8))
         bss_bytes_len=$((bss_bytes_len + total))
         bss_bytes+=$(generate_zeros $total)
