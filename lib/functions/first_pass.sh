@@ -249,7 +249,8 @@ first_pass() {
                 base="${BASH_REMATCH[2]}"
                 disp="${BASH_REMATCH[3]:-}"
                 size=$(calc_mem_addr_size "$base" "$disp")
-                text_bytes_len=$((text_bytes_len + size))
+                # push [mem] uses 1-byte opcode (ff), calc assumes REX; subtract 1
+                text_bytes_len=$((text_bytes_len + size - 1))
             elif [[ "$line" =~ $pop_mem_pattern ]]; then
                 base="${BASH_REMATCH[2]}"
                 disp="${BASH_REMATCH[3]:-}"
@@ -261,6 +262,23 @@ first_pass() {
             
             elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]*(.*)$ ]]; then
                 calculate_arith_ri_size
+            
+            elif [[ "$line" =~ $arith_mem_imm_pattern ]]; then
+                local ambase="${BASH_REMATCH[2]}"
+                local amdisp="${BASH_REMATCH[3]:-}"
+                local amsize=$(calc_mem_addr_size "$ambase" "$amdisp")
+                local amimm="${BASH_REMATCH[4]}"
+                local amval=0
+                if [[ "$amimm" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+                    amval=$((16#${BASH_REMATCH[1]}))
+                elif [[ "$amimm" =~ ^-?[0-9]+$ ]]; then
+                    amval=$((amimm))
+                fi
+                if (( amval >= -128 && amval <= 127 )); then
+                    text_bytes_len=$((text_bytes_len + amsize + 1))
+                else
+                    text_bytes_len=$((text_bytes_len + amsize + 4))
+                fi
             
             elif [[ "$line" =~ ^(je|jne|jg|jl|jge|jle|ja|jb|jae|jbe|jo|jno|js|jns|jmp)[[:space:]]+(.*)$ ]]; then
                 local jlbl="${BASH_REMATCH[2]}"
@@ -284,6 +302,12 @@ first_pass() {
             
             elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
+            
+            elif [[ "$line" =~ $unary_mem_pattern ]]; then
+                local umbase="${BASH_REMATCH[2]}"
+                local umdisp="${BASH_REMATCH[3]:-}"
+                local umsize=$(calc_mem_addr_size "$umbase" "$umdisp")
+                text_bytes_len=$((text_bytes_len + umsize))
             
             elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
                 text_bytes_len=$((text_bytes_len + 5))
@@ -337,6 +361,12 @@ first_pass() {
             
             elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
+            
+            elif [[ "$line" =~ $shift_mem_pattern ]]; then
+                local smbase="${BASH_REMATCH[2]}"
+                local smdisp="${BASH_REMATCH[3]:-}"
+                local smsize=$(calc_mem_addr_size "$smbase" "$smdisp")
+                text_bytes_len=$((text_bytes_len + smsize + 1))
             
             elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 3))

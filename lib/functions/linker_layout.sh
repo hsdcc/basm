@@ -54,7 +54,7 @@ linker_layout() {
   local page=4096
   local f_off_t=$((0x200))
   local f_off_d=$(( (f_off_t + a_t + page - 1) / page * page ))
-  local f_off_r=$((f_off_d + a_d))
+  local f_off_r=$(( (f_off_d + a_d + page - 1) / page * page ))
   local f_off_b=$((f_off_r + a_r))
 
   # virtual addresses

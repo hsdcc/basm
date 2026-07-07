@@ -322,7 +322,7 @@ second_pass() {
             base="${BASH_REMATCH[2]}"
             disp="${BASH_REMATCH[3]}"
             mem_op="[$base$disp]"
-            hex_code=$(assemble_mem_operand "$mem_op" 0 "8f")
+            hex_code=$(assemble_mem_operand "$mem_op" 0 "488f")
             text_hex+=$hex_code
             current_address=$((current_address + ${#hex_code}/2))
 
@@ -393,7 +393,7 @@ second_pass() {
                 local arg="$src"
                 if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
                     val=$((16#${BASH_REMATCH[1]}))
-                elif [[ "$arg" =~ ^[0-9]+$ ]]; then
+                elif [[ "$arg" =~ ^-?[0-9]+$ ]]; then
                     val=$((arg))
                 else
                     echo "error: unknown immediate value '$arg' in '$line'" >&2
