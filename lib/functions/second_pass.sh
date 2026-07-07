@@ -643,6 +643,15 @@ second_pass() {
             mod_rm=$((0xc0 | (regs[$reg1] << 3) | regs[$reg2]))
             text_hex+=$(printf "480faf%02x" $mod_rm)
             current_address=$((current_address + 4))
+        elif [[ "$line" =~ $lea_mem_pattern ]]; then
+            local lreg="${BASH_REMATCH[1]}"
+            local lbase="${BASH_REMATCH[2]}"
+            local ldisp="${BASH_REMATCH[3]:-}"
+            local lmem_op="[$lbase$ldisp]"
+            local lhex=$(assemble_mem_operand "$lmem_op" "${regs[$lreg]}" "488d")
+            text_hex+=$lhex
+            current_address=$((current_address + ${#lhex}/2))
+
         elif [[ "$line" =~ ^lea[[:space:]]+([er][a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
             reg="${BASH_REMATCH[1]}"
             lbl="${BASH_REMATCH[2]}"
@@ -753,14 +762,7 @@ second_pass() {
                 cmpsl) text_hex+="a7"; current_address=$((current_address + 1)) ;;
                 cmpsq) text_hex+="48a7"; current_address=$((current_address + 2)) ;;
             esac
-        elif [[ "$line" =~ $lea_mem_pattern ]]; then
-            local lreg="${BASH_REMATCH[1]}"
-            local lbase="${BASH_REMATCH[2]}"
-            local ldisp="${BASH_REMATCH[3]:-}"
-            local lmem_op="[$lbase$ldisp]"
-            local lhex=$(assemble_mem_operand "$lmem_op" "${regs[$lreg]}" "488d")
-            text_hex+=$lhex
-            current_address=$((current_address + ${#lhex}/2))
+
         elif [[ "$line" =~ $shift_cl_pattern ]]; then
             local scl_op="${BASH_REMATCH[1]}"
             local scl_reg="${BASH_REMATCH[2]}"

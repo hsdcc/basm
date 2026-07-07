@@ -366,6 +366,13 @@ first_pass() {
             elif [[ "$line" =~ ^lea[[:space:]]+([er][a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
                 text_bytes_len=$((text_bytes_len + 7))
             
+            elif [[ "$line" =~ $lea_mem_pattern ]]; then
+                local lea_base="${BASH_REMATCH[2]}"
+                local lea_disp="${BASH_REMATCH[3]:-}"
+                local lea_dval=0
+                [[ -n "$lea_disp" ]] && lea_dval=$((lea_disp))
+                local lea_size=$(calc_mem_addr_size "$lea_base" "$lea_dval")
+                text_bytes_len=$((text_bytes_len + lea_size))
             elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+([er][a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
             
@@ -463,13 +470,6 @@ first_pass() {
                 text_bytes_len=$((text_bytes_len + 4))
             elif [[ "$line" =~ $rep_pattern ]]; then
                 text_bytes_len=$((text_bytes_len + 2))
-            elif [[ "$line" =~ $lea_mem_pattern ]]; then
-                local lea_base="${BASH_REMATCH[2]}"
-                local lea_disp="${BASH_REMATCH[3]:-}"
-                local lea_dval=0
-                [[ -n "$lea_disp" ]] && lea_dval=$((lea_disp))
-                local lea_size=$(calc_mem_addr_size "$lea_base" "$lea_dval")
-                text_bytes_len=$((text_bytes_len + lea_size))
             elif [[ "$line" =~ $mov_mem_imm_pattern ]]; then
                 local mmi_size_kw="${BASH_REMATCH[1]}"
                 local mmi_base="${BASH_REMATCH[2]}"
