@@ -506,10 +506,10 @@ first_pass_ins_size() {
         if [[ "$mmi_size_kw" == "byte " ]]; then
             # No REX.W prefix needed for byte stores
             local mmi_addrsize=$(calc_mem_operand_size "$mmi_mem" 0)
-            text_bytes_len=$((text_bytes_len + mmi_addrsize + 2))
+            text_bytes_len=$((text_bytes_len + mmi_addrsize + 1))
         else
             local mmi_addrsize=$(calc_mem_operand_size "$mmi_mem")
-            text_bytes_len=$((text_bytes_len + mmi_addrsize + 5))
+            text_bytes_len=$((text_bytes_len + mmi_addrsize + 4))
         fi
     elif [[ "$line" =~ $shift_cl_pattern ]]; then
         text_bytes_len=$((text_bytes_len + 3))

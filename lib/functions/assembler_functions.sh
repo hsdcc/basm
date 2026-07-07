@@ -288,6 +288,7 @@ parse_mem_content() {
 }
 calc_mem_encoding_size() {
     local content="$1"
+    content="${content// /}"  # Remove spaces
     local rex_prefix="${2:-1}"  # 1 = include REX.W
     
     local parsed
@@ -307,7 +308,14 @@ calc_mem_encoding_size() {
     [[ "$rex_prefix" == "1" ]] && size=$((size + 1))  # REX.W
     size=$((size + 1))  # opcode
     size=$((size + 1))  # ModRM
-    [[ "$has_sib" == "1" ]] && size=$((size + 1))  # SIB
+    
+    # SIB byte: needed when has_sib is set, OR when base is rsp/r12/esp (always use rm=4)
+    local needs_sib=0
+    [[ "$has_sib" == "1" ]] && needs_sib=1
+    if [[ "$base" == "rsp" || "$base" == "esp" || "$base" == "r12" ]]; then
+        needs_sib=1
+    fi
+    [[ "$needs_sib" == "1" ]] && size=$((size + 1))
     
     # Displacement
     if [[ -z "$base" && "$has_sib" == "1" ]]; then
@@ -322,10 +330,9 @@ calc_mem_encoding_size() {
         else
             size=$((size + 4))
         fi
-    elif [[ "$base" == "rsp" || "$base" == "esp" || "$base" == "r12" ]]; then
-        # rsp-based addressing always uses SIB (even without index), so count SIB already added
-        if [[ -z "$index" && "$disp" == "0" ]]; then
-            size=$((size))  # SIB index=4, mod=00, disp=0
+    elif [[ "$needs_sib" == "1" ]]; then
+        if [[ "$disp" == "0" ]]; then
+            : # mod=00, no disp (SIB has index=4)
         elif (( disp >= -128 && disp <= 127 )); then
             size=$((size + 1))
         else

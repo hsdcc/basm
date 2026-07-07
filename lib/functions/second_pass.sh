@@ -521,7 +521,7 @@ second_pass() {
                     and) op_ext=4 ;;
                     esac
                     mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-                    text_hex+=$(printf "4883%02x%02x" "$mod_rm" "$val")
+                    text_hex+=$(printf "4883%02x%02x" "$mod_rm" $((val & 0xff)))
                     current_address=$((current_address + 4))
                 fi
             fi
@@ -774,7 +774,7 @@ second_pass() {
                 op_ext=7
             fi
             mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-            text_hex+=$(printf "48c1%02x%02x" $mod_rm $val)
+            text_hex+=$(printf "48c1%02x%02x" $mod_rm $((val & 0xff)))
             current_address=$((current_address + 4))
         elif [[ "$line" =~ ^test[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
             reg1="${BASH_REMATCH[1]}"
