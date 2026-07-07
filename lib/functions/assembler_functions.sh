@@ -205,9 +205,12 @@ assemble_mem_operand() {
     
     if [[ "$mem_op" =~ \[([a-z0-9]+)(([+-])([0-9]+))?\] ]]; then
         local base_reg="${BASH_REMATCH[1]}"
-        local sign="${BASH_REMATCH[3]:+}"
+        local sign="${BASH_REMATCH[3]:-+}"
         local disp_val="${BASH_REMATCH[4]:-0}"
-        local disp=$((sign$disp_val))
+        local disp=$((disp_val))
+        if [[ "$sign" == "-" ]]; then
+            disp=$((-disp))
+        fi
         local mod
         local rm
         local sib=""
@@ -302,4 +305,29 @@ assemble_short_jump() {
     local offset_hex=$(printf "%02x" $((offset & 0xff)))
     text_hex+="$opcode$offset_hex"
     current_address=$((current_address + 2))
+}
+calc_sse_mem_size() {
+    local base="$1"
+    local disp="$2"
+    local prefix_len="${3:-3}"
+    local size=$prefix_len
+    (( size++ ))
+    if [[ -z "$disp" ]]; then
+        if [[ "$base" == "rbp" || "$base" == "r13" ]]; then
+            (( size++ ))
+        elif [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+            (( size++ ))
+        fi
+    elif (( disp >= -128 && disp <= 127 )); then
+        (( size++ ))
+        if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+            (( size++ ))
+        fi
+    else
+        (( size += 4 ))
+        if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+            (( size++ ))
+        fi
+    fi
+    echo $size
 }

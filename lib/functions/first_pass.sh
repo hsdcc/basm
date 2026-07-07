@@ -376,8 +376,52 @@ first_pass() {
                 text_bytes_len=$((text_bytes_len + 4))
             elif [[ "$line" =~ $divsd_rr_pattern ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
-            elif [[ "$line" =~ $movsd_mem_pattern ]]; then
+            elif [[ "$line" =~ $sse_mem_src_pattern ]]; then
+                local sse_mne="${BASH_REMATCH[1]}"
+                local sse_base="${BASH_REMATCH[3]}"
+                local sse_disp_str="${BASH_REMATCH[4]:-}"
+                local sse_disp=""
+                if [[ -n "$sse_disp_str" ]]; then
+                    sse_disp=$((sse_disp_str))
+                fi
+                local sse_size
+                if [[ "$sse_mne" == "comiss" || "$sse_mne" == "ucomiss" ]]; then
+                    sse_size=$(calc_sse_mem_size "$sse_base" "$sse_disp" 2)
+                else
+                    sse_size=$(calc_sse_mem_size "$sse_base" "$sse_disp" 3)
+                fi
+                text_bytes_len=$((text_bytes_len + sse_size))
+            elif [[ "$line" =~ $sse_mem_dst_pattern ]]; then
+                local sd_base="${BASH_REMATCH[2]}"
+                local sd_disp_str="${BASH_REMATCH[3]:-}"
+                local sd_disp=""
+                if [[ -n "$sd_disp_str" ]]; then
+                    sd_disp=$((sd_disp_str))
+                fi
+                local sd_size=$(calc_sse_mem_size "$sd_base" "$sd_disp" 3)
+                text_bytes_len=$((text_bytes_len + sd_size))
+            elif [[ "$line" =~ $cvtsi2s_reg_pattern ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
+            elif [[ "$line" =~ $cvtsi2s_mem_pattern ]]; then
+                local c2_base="${BASH_REMATCH[3]}"
+                local c2_disp_str="${BASH_REMATCH[4]:-}"
+                local c2_disp=""
+                if [[ -n "$c2_disp_str" ]]; then
+                    c2_disp=$((c2_disp_str))
+                fi
+                local c2_size=$(calc_sse_mem_size "$c2_base" "$c2_disp" 3)
+                text_bytes_len=$((text_bytes_len + c2_size))
+            elif [[ "$line" =~ $cvtss2si_rr_pattern ]]; then
+                text_bytes_len=$((text_bytes_len + 4))
+            elif [[ "$line" =~ $cvtss2s_mem_pattern ]]; then
+                local cs_base="${BASH_REMATCH[3]}"
+                local cs_disp_str="${BASH_REMATCH[4]:-}"
+                local cs_disp=""
+                if [[ -n "$cs_disp_str" ]]; then
+                    cs_disp=$((cs_disp_str))
+                fi
+                local cs_size=$(calc_sse_mem_size "$cs_base" "$cs_disp" 3)
+                text_bytes_len=$((text_bytes_len + cs_size))
             elif [[ "$line" =~ $cvtsd2si_pattern ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
             else

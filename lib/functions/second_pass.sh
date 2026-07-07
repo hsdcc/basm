@@ -28,12 +28,62 @@ second_pass() {
             handle_fp_operation "divss_rr" 4
         elif [[ "$line" =~ $divsd_rr_pattern ]]; then
             handle_fp_operation "divsd_rr" 4
-        elif [[ "$line" =~ $movsd_mem_pattern ]]; then
-            reg="${BASH_REMATCH[1]}"
-            reg2="${BASH_REMATCH[2]}"
-            mod_rm=$((xmm_regs[$reg] << 3 | regs[$reg2]))
-            text_hex+="${fp_opcodes["movsd_mem"]}$(printf "%02x" $mod_rm)"
+        elif [[ "$line" =~ $sse_mem_src_pattern ]]; then
+            local sse_mne="${BASH_REMATCH[1]}"
+            local sse_xmm="${BASH_REMATCH[2]}"
+            local sse_base="${BASH_REMATCH[3]}"
+            local sse_disp_str="${BASH_REMATCH[4]:-}"
+            local sse_mem_op="[$sse_base$sse_disp_str]"
+            local sse_opcode
+            if [[ "$sse_mne" == "comiss" || "$sse_mne" == "comisd" || "$sse_mne" == "ucomiss" || "$sse_mne" == "ucomisd" ]]; then
+                sse_opcode="${fp_opcodes[$sse_mne]}"
+            else
+                sse_opcode="${fp_opcodes[${sse_mne}_rr]}"
+            fi
+            local sse_hex=$(assemble_mem_operand "$sse_mem_op" "${xmm_regs[$sse_xmm]}" "$sse_opcode")
+            text_hex+=$sse_hex
+            current_address=$((current_address + ${#sse_hex}/2))
+        elif [[ "$line" =~ $sse_mem_dst_pattern ]]; then
+            local sd_mne="${BASH_REMATCH[1]}"
+            local sd_base="${BASH_REMATCH[2]}"
+            local sd_disp_str="${BASH_REMATCH[3]:-}"
+            local sd_xmm="${BASH_REMATCH[4]}"
+            local sd_mem_op="[$sd_base$sd_disp_str]"
+            local sd_opcode="${fp_opcodes[${sd_mne}_store]}"
+            local sd_hex=$(assemble_mem_operand "$sd_mem_op" "${xmm_regs[$sd_xmm]}" "$sd_opcode")
+            text_hex+=$sd_hex
+            current_address=$((current_address + ${#sd_hex}/2))
+        elif [[ "$line" =~ $cvtsi2s_reg_pattern ]]; then
+            local c2_mne="${BASH_REMATCH[1]}"
+            local c2_xmm="${BASH_REMATCH[2]}"
+            local c2_reg="${BASH_REMATCH[3]}"
+            local c2_mod_rm=$(build_mod_rm 3 ${xmm_regs[$c2_xmm]} ${regs[$c2_reg]})
+            text_hex+="${fp_opcodes[$c2_mne]}$(printf "%02x" $c2_mod_rm)"
             current_address=$((current_address + 4))
+        elif [[ "$line" =~ $cvtsi2s_mem_pattern ]]; then
+            local c2m_mne="${BASH_REMATCH[1]}"
+            local c2m_xmm="${BASH_REMATCH[2]}"
+            local c2m_base="${BASH_REMATCH[3]}"
+            local c2m_disp_str="${BASH_REMATCH[4]:-}"
+            local c2m_mem_op="[$c2m_base$c2m_disp_str]"
+            local c2m_hex=$(assemble_mem_operand "$c2m_mem_op" "${xmm_regs[$c2m_xmm]}" "${fp_opcodes[$c2m_mne]}")
+            text_hex+=$c2m_hex
+            current_address=$((current_address + ${#c2m_hex}/2))
+        elif [[ "$line" =~ $cvtss2si_rr_pattern ]]; then
+            local cs_reg="${BASH_REMATCH[1]}"
+            local cs_xmm="${BASH_REMATCH[2]}"
+            local cs_mod_rm=$(build_mod_rm 3 ${regs[$cs_reg]} ${xmm_regs[$cs_xmm]})
+            text_hex+="${fp_opcodes["cvtss2si"]}$(printf "%02x" $cs_mod_rm)"
+            current_address=$((current_address + 4))
+        elif [[ "$line" =~ $cvtss2s_mem_pattern ]]; then
+            local csm_mne="${BASH_REMATCH[1]}"
+            local csm_reg="${BASH_REMATCH[2]}"
+            local csm_base="${BASH_REMATCH[3]}"
+            local csm_disp_str="${BASH_REMATCH[4]:-}"
+            local csm_mem_op="[$csm_base$csm_disp_str]"
+            local csm_hex=$(assemble_mem_operand "$csm_mem_op" "${regs[$csm_reg]}" "${fp_opcodes[$csm_mne]}")
+            text_hex+=$csm_hex
+            current_address=$((current_address + ${#csm_hex}/2))
         elif [[ "$line" =~ $cvtsd2si_pattern ]]; then
             reg="${BASH_REMATCH[1]}"
             xmm="${BASH_REMATCH[2]}"
@@ -77,6 +127,32 @@ second_pass() {
             mod_rm=$((0xc0 | (dst_reg << 3) | src_reg))
             text_hex+=$(printf "4863%02x" $mod_rm)
             current_address=$((current_address + 3))
+        elif [[ "$line" =~ $string_op_pattern ]]; then
+            case "$line" in
+                movsb) text_hex+="a4"; current_address=$((current_address + 1)) ;;
+                movsw) text_hex+="66a5"; current_address=$((current_address + 2)) ;;
+                movsl) text_hex+="a5"; current_address=$((current_address + 1)) ;;
+                movsq) text_hex+="48a5"; current_address=$((current_address + 2)) ;;
+                stosb) text_hex+="aa"; current_address=$((current_address + 1)) ;;
+                stosw) text_hex+="66ab"; current_address=$((current_address + 2)) ;;
+                stosl) text_hex+="ab"; current_address=$((current_address + 1)) ;;
+                stosq) text_hex+="48ab"; current_address=$((current_address + 2)) ;;
+                lodsb) text_hex+="ac"; current_address=$((current_address + 1)) ;;
+                lodsw) text_hex+="66ad"; current_address=$((current_address + 2)) ;;
+                lodsl) text_hex+="ad"; current_address=$((current_address + 1)) ;;
+                lodsq) text_hex+="48ad"; current_address=$((current_address + 2)) ;;
+                scasb) text_hex+="ae"; current_address=$((current_address + 1)) ;;
+                scasw) text_hex+="66af"; current_address=$((current_address + 2)) ;;
+                scasl) text_hex+="af"; current_address=$((current_address + 1)) ;;
+                scasq) text_hex+="48af"; current_address=$((current_address + 2)) ;;
+                cmpsb) text_hex+="a6"; current_address=$((current_address + 1)) ;;
+                cmpsw) text_hex+="66a7"; current_address=$((current_address + 2)) ;;
+                cmpsl) text_hex+="a7"; current_address=$((current_address + 1)) ;;
+                cmpsq) text_hex+="48a7"; current_address=$((current_address + 2)) ;;
+                cld) text_hex+="fc"; current_address=$((current_address + 1)) ;;
+                std) text_hex+="fd"; current_address=$((current_address + 1)) ;;
+            esac
+
         elif [[ "$line" =~ ^mov ]]; then
             local mov_operands="${line#mov }"
             local dst="${mov_operands%%,*}"
@@ -207,6 +283,49 @@ second_pass() {
             op=$((0x58 + regs[$reg]))
             text_hex+=$(printf "%02x" $op)
             current_address=$((current_address + 1))
+        elif [[ "$line" =~ $push_imm_pattern ]]; then
+            arg="${BASH_REMATCH[1]}"
+            if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+                val=$((16#${BASH_REMATCH[1]}))
+            else
+                val=$((arg))
+            fi
+            if (( val >= -128 && val <= 127 )); then
+                text_hex+=$(printf "6a%02x" $((val & 0xff)))
+                current_address=$((current_address + 2))
+            else
+                text_hex+=$(printf "68")$(u32le $val)
+                current_address=$((current_address + 5))
+            fi
+        elif [[ "$line" =~ $push_equsym_pattern ]]; then
+            sym="${BASH_REMATCH[1]}"
+            if [[ -n "${equs[$sym]:-}" ]]; then
+                val=${equs[$sym]}
+                if (( val >= -128 && val <= 127 )); then
+                    text_hex+=$(printf "6a%02x" $((val & 0xff)))
+                    current_address=$((current_address + 2))
+                else
+                    text_hex+=$(printf "68")$(u32le $val)
+                    current_address=$((current_address + 5))
+                fi
+            else
+                error_msg "unknown symbol '$sym' in push instruction"
+            fi
+        elif [[ "$line" =~ $push_mem_pattern ]]; then
+            base="${BASH_REMATCH[2]}"
+            disp="${BASH_REMATCH[3]}"
+            mem_op="[$base$disp]"
+            hex_code=$(assemble_mem_operand "$mem_op" 6 "ff")
+            text_hex+=$hex_code
+            current_address=$((current_address + ${#hex_code}/2))
+        elif [[ "$line" =~ $pop_mem_pattern ]]; then
+            base="${BASH_REMATCH[2]}"
+            disp="${BASH_REMATCH[3]}"
+            mem_op="[$base$disp]"
+            hex_code=$(assemble_mem_operand "$mem_op" 0 "8f")
+            text_hex+=$hex_code
+            current_address=$((current_address + ${#hex_code}/2))
+
         elif [[ "$line" =~ $arith_mem_imm_pattern ]]; then
             local mop="${BASH_REMATCH[1]}"
             local mbase="${BASH_REMATCH[2]}"
