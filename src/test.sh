@@ -812,6 +812,44 @@ else
 fi
 rm -f "$obj_align1" "$obj_align2" "$exe_align"
 
+
+echo "	testing linking_segment_perms"
+asm_seg_perms="section .text
+global _start
+_start:
+    mov rax, 60
+    xor rdi, rdi
+    syscall
+section .data
+val: dq 42"
+
+seg_exe="$(mktemp)"
+if ! basm_assemble "$asm_seg_perms" "$seg_exe"; then
+  echo "	[FAIL] linking_segment_perms: assembly failed"
+  failed_tests=$((failed_tests + 1))
+else
+  # count LOAD segments and extract flags
+  readelf_out=$(readelf -l "$seg_exe" 2>/dev/null)
+  seg_count=$(echo "$readelf_out" | grep -c 'LOAD')
+  # get unique flag strings (R E, RW, R, etc)
+  seg_flags=$(echo "$readelf_out" | grep -oP 'R\s*E|RW|R\s+' | sort -u | tr '\n' ' ')
+  text_has_re=$(echo "$seg_flags" | grep -q 'R E' && echo 1 || echo 0)
+  data_has_rw=$(echo "$seg_flags" | grep -q 'RW' && echo 1 || echo 0)
+  if (( seg_count != 2 )); then
+    echo "	[FAIL] linking_segment_perms: expected 2 LOAD segments, got $seg_count"
+    failed_tests=$((failed_tests + 1))
+  elif (( text_has_re != 1 )); then
+    echo "	[FAIL] linking_segment_perms: missing RE segment (got $seg_flags)"
+    failed_tests=$((failed_tests + 1))
+  elif (( data_has_rw != 1 )); then
+    echo "	[FAIL] linking_segment_perms: missing RW segment (got $seg_flags)"
+    failed_tests=$((failed_tests + 1))
+  else
+    echo "	[PASS] linking_segment_perms ($seg_count LOAD: $seg_flags)"
+  fi
+fi
+rm -f "$seg_exe"
+
 if ((failed_tests > 0)); then
   echo
   echo "$failed_tests test(s) failed."
