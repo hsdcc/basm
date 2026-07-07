@@ -213,8 +213,7 @@ first_pass() {
       return 1
     fi
   done
-
-  return 0
+    return 0
 }
 
 # Calculate size of one instruction line (used by first_pass)
@@ -600,6 +599,5 @@ first_pass_ins_size() {
     error_msg "unsupported instruction: '$line'"
     return 1
   fi
-
-  return 0
+    return 0
 }

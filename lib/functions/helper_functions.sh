@@ -144,11 +144,8 @@ calculate_arith_ri_size() {
     arg="${BASH_REMATCH[3]}"
     local ar_rex=$(get_rex_for_reg "$reg")
     if [[ "$reg" == "rax" ]]; then
-        if [[ "$line" =~ ^cmp.*$ ]]; then
-            text_bytes_len=$((text_bytes_len + 5 + ${#ar_rex}/2))
-        else
-            text_bytes_len=$((text_bytes_len + 6 + ${#ar_rex}/2))
-        fi
+        # rax has dedicated opcode (25/3d) + imm32, no imm8 form
+        text_bytes_len=$((text_bytes_len + 5 + ${#ar_rex}/2))
     else
         # Check if imm8 is sufficient
         local arv=0
