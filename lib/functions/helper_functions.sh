@@ -17,6 +17,16 @@ get_reg_num() {
         *) echo -1 ;;
     esac
 }
+
+get_reg_size() {
+    local reg="$1"
+    case "$reg" in
+        al|cl|dl|bl|ah|ch|dh|bh|spl|bpl|sil|dil) echo 1 ;;
+        ax|cx|dx|bx|sp|bp|si|di) echo 2 ;;
+        eax|ecx|edx|ebx|esp|ebp|esi|edi) echo 4 ;;
+        *) echo 8 ;;
+    esac
+}
 build_mod_rm() {
     local mod=$1 reg=$2 rm=$3
     echo $((mod * 64 + reg * 8 + rm))
@@ -64,29 +74,37 @@ calc_mem_addr_size() {
     echo $size
 }
 calculate_mov_size() {
+    local dest_reg="${BASH_REMATCH[1]}"
+    local dreg_num=$(get_reg_num "$dest_reg")
     arg="${BASH_REMATCH[2]}"
-    if [[ "$arg" =~ ^\[(r[a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
+    if [[ "$arg" =~ ^\[([er][a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
         base="${BASH_REMATCH[1]}"
         disp="${BASH_REMATCH[2]:-}"
         size=$(calc_mem_addr_size "$base" "$disp")
         text_bytes_len=$((text_bytes_len + size))
-    elif [[ "$arg" =~ ^\[(r[a-z]{2})([\+\-][0-9]+)?\],[[:space:]]+(r[a-z]{2})$ ]]; then
+    elif [[ "$arg" =~ ^\[([er][a-z]{2})([\+\-][0-9]+)?\],[[:space:]]+([er][a-z]{2})$ ]]; then
         base="${BASH_REMATCH[1]}"
         disp="${BASH_REMATCH[2]:-}"
         size=$(calc_mem_addr_size "$base" "$disp")
         text_bytes_len=$((text_bytes_len + size))
     elif [[ "$arg" =~ ^[0-9]+$ ]] || [[ "$arg" =~ ^-?[0-9]+$ ]] || [[ "$arg" =~ ^0x[0-9a-fA-F]+$ ]] || [[ -n "${equs[$arg]:-}" ]]; then
-        if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
-            val=$((16#${BASH_REMATCH[1]}))
-        elif [[ "$arg" =~ ^-?[0-9]+$ ]]; then
-            val=$((arg))
-        elif [[ -n "${equs[$arg]:-}" ]]; then
-            val=${equs[$arg]}
-        fi
-        if (( val >= -2147483648 && val <= 2147483647 )); then
-            text_bytes_len=$((text_bytes_len + 7))
+        if (( dreg_num >= 0 && $(get_reg_size "$dest_reg") == 1 )); then
+            text_bytes_len=$((text_bytes_len + 2))
+        elif (( dreg_num >= 0 && $(get_reg_size "$dest_reg") == 4 )); then
+            text_bytes_len=$((text_bytes_len + 5))
         else
-            text_bytes_len=$((text_bytes_len + 10))
+            if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+                val=$((16#${BASH_REMATCH[1]}))
+            elif [[ "$arg" =~ ^-?[0-9]+$ ]]; then
+                val=$((arg))
+            elif [[ -n "${equs[$arg]:-}" ]]; then
+                val=${equs[$arg]}
+            fi
+            if (( val >= -2147483648 && val <= 2147483647 )); then
+                text_bytes_len=$((text_bytes_len + 7))
+            else
+                text_bytes_len=$((text_bytes_len + 10))
+            fi
         fi
     else
         text_bytes_len=$((text_bytes_len + 10))

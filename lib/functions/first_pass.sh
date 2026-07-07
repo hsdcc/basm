@@ -193,16 +193,22 @@ first_pass() {
             fi
             text_ins+=("$line")
             
+            if [[ "$line" =~ ^mov[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil),[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil)$ ]]; then
+                local mv_reg1="${BASH_REMATCH[1]}"
+                local mv_reg2="${BASH_REMATCH[2]}"
+                if (( $(get_reg_num "$mv_reg1") >= 0 && $(get_reg_num "$mv_reg2") >= 0 )); then
+                    text_bytes_len=$((text_bytes_len + 3))
+                else
+                    error_msg "invalid register in mov '$line'"
+                    return 1
+                fi
             
-            if [[ "$line" =~ ^mov[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
-                text_bytes_len=$((text_bytes_len + 3))
-            
-            elif [[ "$line" =~ ^mov[[:space:]]+\[([er][a-z]{2})\],[[:space:]]+([er][a-z]{2})$ ]]; then
+            elif [[ "$line" =~ ^mov[[:space:]]+\[([er][a-z]{2})\],[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil)$ ]]; then
                 local base="${BASH_REMATCH[1]}"
                 local size=$(calc_mem_addr_size "$base" "")
                 text_bytes_len=$((text_bytes_len + size))
             
-            elif [[ "$line" =~ ^mov[[:space:]]+([er][a-z]{2}),[[:space:]]+\[([er][a-z]{2})\]$ ]]; then
+            elif [[ "$line" =~ ^mov[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil),[[:space:]]+\[([er][a-z]{2})\]$ ]]; then
                 local base="${BASH_REMATCH[2]}"
                 local size=$(calc_mem_addr_size "$base" "")
                 text_bytes_len=$((text_bytes_len + size))
@@ -210,7 +216,7 @@ first_pass() {
             elif [[ "$line" =~ $cmov_pattern ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
             
-            elif [[ "$line" =~ ^mov[[:space:]]+([er][a-z]{2}),[[:space:]]+(.*)$ ]]; then
+            elif [[ "$line" =~ ^mov[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil),[[:space:]]+(.*)$ ]]; then
                 calculate_mov_size
             
             elif [[ "$line" =~ ^(syscall|nop|ret|leave|cqo|cdqe)$ ]]; then
@@ -290,7 +296,14 @@ first_pass() {
             elif [[ "$line" =~ ^(je|jne|jg|jl|jge|jle|ja|jb|jae|jbe|jo|jno|js|jns|jmp)[[:space:]]+(.*)$ ]]; then
                 local jlbl="${BASH_REMATCH[2]}"
                 jlbl="$(trim_string "$jlbl")"
-                if [[ -n "${externals[$jlbl]:-}" ]]; then
+                local jreg_num=$(get_reg_num "$jlbl")
+                if (( jreg_num >= 0 )); then
+                    if [[ "${BASH_REMATCH[1]}" == "jmp" ]]; then
+                        text_bytes_len=$((text_bytes_len + 2))
+                    else
+                        error_msg "conditional jump to register not supported"
+                    fi
+                elif [[ -n "${externals[$jlbl]:-}" ]]; then
                     if [[ "${BASH_REMATCH[1]}" == "jmp" ]]; then
                         text_bytes_len=$((text_bytes_len + 5))
                     else
@@ -316,6 +329,8 @@ first_pass() {
                 local umsize=$(calc_mem_addr_size "$umbase" "$umdisp")
                 text_bytes_len=$((text_bytes_len + umsize))
             
+            elif [[ "$line" =~ ^call[[:space:]]+([er][a-z]{2})$ ]]; then
+                text_bytes_len=$((text_bytes_len + 2))
             elif [[ "$line" =~ ^call[[:space:]]+([.a-zA-Z0-9_]+)$ ]]; then
                 text_bytes_len=$((text_bytes_len + 5))
             
@@ -388,7 +403,7 @@ first_pass() {
             elif [[ "$line" =~ ^test[[:space:]]+([er][a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
                 text_bytes_len=$((text_bytes_len + 7))
             
-              elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+([er][a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh])$ ]]; then
+              elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+([er][a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh]|dil|sil|bpl|spl)$ ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
             
             elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
@@ -397,7 +412,7 @@ first_pass() {
             elif [[ "$line" =~ ^movsxd[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
             
-            elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|[er][a-z]{2})$ ]]; then
+            elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|dil|sil|bpl|spl|[er][a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
             
             elif [[ "$line" =~ $movss_rr_pattern ]]; then
