@@ -68,11 +68,11 @@ xmm_regs["xmm13"]=13
 xmm_regs["xmm14"]=14
 xmm_regs["xmm15"]=15
 declare -A arith_opcodes
-arith_opcodes["add"]="4801%02x"
-arith_opcodes["sub"]="4829%02x"
-arith_opcodes["or"]="4809%02x"
-arith_opcodes["and"]="4821%02x"
-arith_opcodes["cmp"]="4839%02x"
+arith_opcodes["add"]="01%02x"
+arith_opcodes["sub"]="29%02x"
+arith_opcodes["or"]="09%02x"
+arith_opcodes["and"]="21%02x"
+arith_opcodes["cmp"]="39%02x"
 declare -A jump_opcodes
 jump_opcodes["je"]="74"
 jump_opcodes["jne"]="75"

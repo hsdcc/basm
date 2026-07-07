@@ -69,3 +69,6 @@ imul_ri_pattern='^imul[[:space:]]+([er][a-z]{2}),[[:space:]]+(-?[0-9]+|0x[0-9a-f
 movzx_mem_pattern='^(movzx)[[:space:]]+([er][a-z]{2}),[[:space:]]+(byte[[:space:]]+)?\[([^]]+)\]$'
 movsx_mem_pattern='^(movsx)[[:space:]]+([er][a-z]{2}),[[:space:]]+(byte[[:space:]]+)?\[([^]]+)\]$'
 movsxd_mem_pattern='^(movsxd)[[:space:]]+([er][a-z]{2}),[[:space:]]+\[([^]]+)\]$'
+
+movzx_word_mem_pattern='^(movzx)[[:space:]]+([er][a-z]{2}),[[:space:]]+(word[[:space:]]+)?\[([^]]+)\]$'
+movsx_word_mem_pattern='^(movsx)[[:space:]]+([er][a-z]{2}),[[:space:]]+(word[[:space:]]+)?\[([^]]+)\]$'

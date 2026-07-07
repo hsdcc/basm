@@ -27,6 +27,24 @@ get_reg_size() {
         *) echo 8 ;;
     esac
 }
+# Return REX prefix for a register, empty for no prefix
+# 48 for 64-bit, 66 for 16-bit, 40 for spl/bpl/sil/dil, empty for 32-bit/8-bit
+get_rex_for_reg() {
+    local reg="$1"
+    local size=$(get_reg_size "$reg")
+    if (( size == 8 )); then
+        echo "48"
+    elif (( size == 4 )); then
+        echo ""
+    elif (( size == 2 )); then
+        echo "66"
+    else
+        case "$reg" in
+            spl|bpl|sil|dil) echo "40" ;;
+            *) echo "" ;;
+        esac
+    fi
+}
 build_mod_rm() {
     local mod=$1 reg=$2 rm=$3
     echo $((mod * 64 + reg * 8 + rm))
@@ -84,15 +102,20 @@ calculate_mov_size() {
     local dreg_num=$(get_reg_num "$dest_reg")
     arg="${BASH_REMATCH[2]}"
     if [[ "$arg" =~ ^\[([^]]+)\]$ ]]; then
-        # Memory operand: full content (possibly SIB)
+        # reg, [mem]
         local mem="${BASH_REMATCH[1]}"
-        local size=$(calc_mem_operand_size "$mem")
-        text_bytes_len=$((text_bytes_len + size))
+        local cm_size=$(calc_mem_operand_size "$mem")
+        local cm_rex=$(get_rex_for_reg "$dest_reg")
+        [[ -z "$cm_rex" ]] && cm_size=$((cm_size - 1))
+        text_bytes_len=$((text_bytes_len + cm_size))
     elif [[ "$arg" =~ ^\[([^]]+)\],[[:space:]]+([er][a-z]{2})$ ]]; then
         # [mem], reg
         local mem="${BASH_REMATCH[1]}"
-        local size=$(calc_mem_operand_size "$mem")
-        text_bytes_len=$((text_bytes_len + size))
+        local cm2_reg="${BASH_REMATCH[2]}"
+        local cm2_size=$(calc_mem_operand_size "$mem")
+        local cm2_rex=$(get_rex_for_reg "$cm2_reg")
+        [[ -z "$cm2_rex" ]] && cm2_size=$((cm2_size - 1))
+        text_bytes_len=$((text_bytes_len + cm2_size))
     elif [[ "$arg" =~ ^[0-9]+$ ]] || [[ "$arg" =~ ^-?[0-9]+$ ]] || [[ "$arg" =~ ^0x[0-9a-fA-F]+$ ]] || [[ -n "${equs[$arg]:-}" ]]; then
         if (( dreg_num >= 0 && $(get_reg_size "$dest_reg") == 1 )); then
             text_bytes_len=$((text_bytes_len + 2))
@@ -119,14 +142,28 @@ calculate_mov_size() {
 calculate_arith_ri_size() {
     reg="${BASH_REMATCH[2]}"
     arg="${BASH_REMATCH[3]}"
+    local ar_rex=$(get_rex_for_reg "$reg")
     if [[ "$reg" == "rax" ]]; then
         if [[ "$line" =~ ^cmp.*$ ]]; then
-            text_bytes_len=$((text_bytes_len + 6))
+            text_bytes_len=$((text_bytes_len + 5 + ${#ar_rex}/2))
         else
-            text_bytes_len=$((text_bytes_len + 7))
+            text_bytes_len=$((text_bytes_len + 6 + ${#ar_rex}/2))
         fi
     else
-        text_bytes_len=$((text_bytes_len + 4))
+        # Check if imm8 is sufficient
+        local arv=0
+        if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+            arv=$((16#${BASH_REMATCH[1]}))
+        elif [[ "$arg" =~ ^-?[0-9]+$ ]]; then
+            arv=$((arg))
+        fi
+        if (( arv >= -128 && arv <= 127 )); then
+            # 83 /0 ib (3 bytes) + REX
+            text_bytes_len=$((text_bytes_len + 3 + ${#ar_rex}/2))
+        else
+            # 81 /0 id (6 bytes) + REX
+            text_bytes_len=$((text_bytes_len + 6 + ${#ar_rex}/2))
+        fi
     fi
 }
 calculate_simple_instr_size() {

@@ -7,8 +7,21 @@ second_pass() {
     current_address=0
     
     for line in "${ins_array[@]}"; do
-            # Strip size keywords before mem operands
-            if [[ "$line" =~ (byte|word|dword|qword)[[:space:]]+\[ ]]; then
+            # Detect size keywords (from @markers or raw text) and strip
+            detected_size_kw=""
+            if [[ "$line" =~ @(byte|word|dword|qword)[[:space:]](.*) ]]; then
+                detected_size_kw="${BASH_REMATCH[1]}"
+                line="$(trim_string "${BASH_REMATCH[2]}")"
+            elif [[ "$line" =~ (byte|word|dword|qword)[[:space:]]+\[ ]]; then
+                if [[ "$line" =~ qword[[:space:]]+[[] ]]; then
+                    detected_size_kw="qword"
+                elif [[ "$line" =~ dword[[:space:]]+[[] ]]; then
+                    detected_size_kw="dword"
+                elif [[ "$line" =~ word[[:space:]]+[[] ]]; then
+                    detected_size_kw="word"
+                elif [[ "$line" =~ byte[[:space:]]+[[] ]]; then
+                    detected_size_kw="byte"
+                fi
                 line="${line//dword [/[}"
                 line="${line//qword [/[}"
                 line="${line//word [/[}"
@@ -93,6 +106,65 @@ second_pass() {
             mod_rm=$((0xc0 | regs[$reg] << 3 | xmm_regs[$xmm]))
             text_hex+="${fp_opcodes["cvtsd2si"]}$(printf "%02x" $mod_rm)"
             current_address=$((current_address + 4))
+        elif [[ "$line" =~ $movzx_word_mem_pattern ]]; then
+            # movzx reg, word|byte [mem]
+            op="${BASH_REMATCH[1]}"
+            dst="${BASH_REMATCH[2]}"
+            local zwmem="${BASH_REMATCH[4]}"
+            local zwmem_op="[$zwmem]"
+            dst_reg=$(get_reg_num "$dst")
+            local rex=$(get_rex_for_reg "$dst")
+            if [[ "$detected_size_kw" == "word" ]]; then
+                local zwhex=$(assemble_mem_operand "$zwmem_op" "${regs[$dst]}" "${rex}0fb7")
+            else
+                local zwhex=$(assemble_mem_operand "$zwmem_op" "${regs[$dst]}" "${rex}0fb6")
+            fi
+            text_hex+=$zwhex
+            current_address=$((current_address + ${#zwhex}/2))
+        elif [[ "$line" =~ $movsx_word_mem_pattern ]]; then
+            # movsx reg, word|byte [mem]
+            op="${BASH_REMATCH[1]}"
+            dst="${BASH_REMATCH[2]}"
+            local swmem="${BASH_REMATCH[4]}"
+            local swmem_op="[$swmem]"
+            dst_reg=$(get_reg_num "$dst")
+            local rex=$(get_rex_for_reg "$dst")
+            if [[ "$detected_size_kw" == "word" ]]; then
+                local swhex=$(assemble_mem_operand "$swmem_op" "${regs[$dst]}" "${rex}0fbf")
+            else
+                local swhex=$(assemble_mem_operand "$swmem_op" "${regs[$dst]}" "${rex}0fbe")
+            fi
+            text_hex+=$swhex
+            current_address=$((current_address + ${#swhex}/2))
+        elif [[ "$line" =~ $movzx_mem_pattern ]]; then
+            op="${BASH_REMATCH[1]}"
+            dst="${BASH_REMATCH[2]}"
+            local zmem="${BASH_REMATCH[4]}"
+            local zmem_op="[$zmem]"
+            dst_reg=$(get_reg_num "$dst")
+            local rex=$(get_rex_for_reg "$dst")
+            zhex=$(assemble_mem_operand "$zmem_op" "${regs[$dst]}" "${rex}0fb6")
+            text_hex+=$zhex
+            current_address=$((current_address + ${#zhex}/2))
+        elif [[ "$line" =~ $movsx_mem_pattern ]]; then
+            op="${BASH_REMATCH[1]}"
+            dst="${BASH_REMATCH[2]}"
+            local smem="${BASH_REMATCH[4]}"
+            local smem_op="[$smem]"
+            dst_reg=$(get_reg_num "$dst")
+            local rex=$(get_rex_for_reg "$dst")
+            shex=$(assemble_mem_operand "$smem_op" "${regs[$dst]}" "${rex}0fbe")
+            text_hex+=$shex
+            current_address=$((current_address + ${#shex}/2))
+        elif [[ "$line" =~ $movsxd_mem_pattern ]]; then
+            dst="${BASH_REMATCH[1]}"
+            local xmem="${BASH_REMATCH[3]}"
+            local xmem_op="[$xmem]"
+            dst_reg=$(get_reg_num "$dst")
+            local rex=$(get_rex_for_reg "$dst")
+            xhex=$(assemble_mem_operand "$xmem_op" "${regs[$dst]}" "${rex}63")
+            text_hex+=$xhex
+            current_address=$((current_address + ${#xhex}/2))
         elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+([er][a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh]|dil|sil|bpl|spl|[er][a-z]{2})$ ]]; then
             op="${BASH_REMATCH[1]}"
             dst="${BASH_REMATCH[2]}"
@@ -108,38 +180,13 @@ second_pass() {
                 return 1
             fi
             mod_rm=$((0xc0 | (dst_reg << 3) | src_reg))
+            local rex=$(get_rex_for_reg "$dst")
             if [[ "$op" == "movzx" ]]; then
-                text_hex+=$(printf "480fb6%02x" $mod_rm)
+                text_hex+="${rex}0fb6$(printf "%02x" $mod_rm)"
             else
-                text_hex+=$(printf "480fbe%02x" $mod_rm)
+                text_hex+="${rex}0fbe$(printf "%02x" $mod_rm)"
             fi
-            current_address=$((current_address + 4))
-        elif [[ "$line" =~ $movzx_mem_pattern ]]; then
-            op="${BASH_REMATCH[1]}"
-            dst="${BASH_REMATCH[2]}"
-            local zmem="${BASH_REMATCH[4]}"
-            local zmem_op="[$zmem]"
-            dst_reg=$(get_reg_num "$dst")
-            zhex=$(assemble_mem_operand "$zmem_op" "${regs[$dst]}" "480fb6")
-            text_hex+=$zhex
-            current_address=$((current_address + ${#zhex}/2))
-        elif [[ "$line" =~ $movsx_mem_pattern ]]; then
-            op="${BASH_REMATCH[1]}"
-            dst="${BASH_REMATCH[2]}"
-            local smem="${BASH_REMATCH[4]}"
-            local smem_op="[$smem]"
-            dst_reg=$(get_reg_num "$dst")
-            shex=$(assemble_mem_operand "$smem_op" "${regs[$dst]}" "480fbe")
-            text_hex+=$shex
-            current_address=$((current_address + ${#shex}/2))
-        elif [[ "$line" =~ $movsxd_mem_pattern ]]; then
-            dst="${BASH_REMATCH[1]}"
-            local xmem="${BASH_REMATCH[3]}"
-            local xmem_op="[$xmem]"
-            dst_reg=$(get_reg_num "$dst")
-            xhex=$(assemble_mem_operand "$xmem_op" "${regs[$dst]}" "4863")
-            text_hex+=$xhex
-            current_address=$((current_address + ${#xhex}/2))
+            current_address=$((current_address + 3 + ${#rex}/2))
         elif [[ "$line" =~ ^movsxd[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
             dst="${BASH_REMATCH[1]}"
             src="${BASH_REMATCH[2]}"
@@ -154,8 +201,9 @@ second_pass() {
                 return 1
             fi
             mod_rm=$((0xc0 | (dst_reg << 3) | src_reg))
-            text_hex+=$(printf "4863%02x" $mod_rm)
-            current_address=$((current_address + 3))
+            local rex=$(get_rex_for_reg "$dst")
+            text_hex+="${rex}63$(printf "%02x" $mod_rm)"
+            current_address=$((current_address + 2 + ${#rex}/2))
         elif [[ "$line" =~ $string_op_pattern ]]; then
             case "$line" in
                 movsb) text_hex+="a4"; current_address=$((current_address + 1)) ;;
@@ -191,12 +239,20 @@ second_pass() {
             local dst_reg_num=$(get_reg_num "$dst")
             local src_reg_num=$(get_reg_num "$src")
             if (( dst_reg_num >= 0 && src_reg_num >= 0 )); then
-                
+                # mov reg, reg — size depends on destination register
+                local rex=$(get_rex_for_reg "$dst")
+                local size=2  # opcode + modrm
+                [[ -n "$rex" ]] && size=$((size + 1))
                 local mod_rm=$((0xc0 + src_reg_num * 8 + dst_reg_num))
-                text_hex+=$(printf "4889%02x" "$mod_rm")
-                current_address=$((current_address + 3))
+                if (( $(get_reg_size "$dst") == 1 )); then
+                    # Byte move: use 8-bit opcode (88 for mov r/m8, r8)
+                    text_hex+="${rex}88$(printf "%02x" "$mod_rm")"
+                else
+                    text_hex+="${rex}89$(printf "%02x" "$mod_rm")"
+                fi
+                current_address=$((current_address + size))
             elif [[ "$src" =~ ^(-?[0-9]+|0x[0-9a-fA-F]+)$ && "$dst" =~ \[.*\]$ ]]; then
-                
+                # mov [mem], imm
                 local mmi_val=0
                 if [[ "$src" =~ ^0x([0-9a-fA-F]+)$ ]]; then
                     mmi_val=$((16#${BASH_REMATCH[1]}))
@@ -205,10 +261,14 @@ second_pass() {
                 fi
                 local mmi_mem_op="$dst"
                 local mmi_opcode="48c7"
-                if [[ "$dst" =~ ^byte[[:space:]]+\[ ]]; then
+                if [[ "$detected_size_kw" == "byte" ]]; then
                     mmi_opcode="c6"
-                elif [[ "$dst" =~ ^dword[[:space:]]+\[ ]]; then
+                elif [[ "$detected_size_kw" == "word" ]]; then
+                    mmi_opcode="66c7"
+                elif [[ "$detected_size_kw" == "dword" ]]; then
                     mmi_opcode="c7"
+                elif [[ "$detected_size_kw" == "qword" ]]; then
+                    mmi_opcode="48c7"
                 fi
                 local mmi_hex=$(assemble_mem_operand "$mmi_mem_op" 0 "$mmi_opcode")
                 text_hex+=$mmi_hex
@@ -216,27 +276,38 @@ second_pass() {
                 if [[ "$mmi_opcode" == "c6" ]]; then
                     text_hex+=$(printf "%02x" $((mmi_val & 0xff)))
                     current_address=$((current_address + 1))
+                elif [[ "$detected_size_kw" == "word" ]]; then
+                    local imm16=$((mmi_val & 0xffff))
+                    text_hex+=$(printf "%02x%02x" $((imm16 & 0xff)) $(((imm16 >> 8) & 0xff)))
+                    current_address=$((current_address + 2))
                 else
                     text_hex+=$(u32le $mmi_val)
                     current_address=$((current_address + 4))
                 fi
             elif [[ "$dst" =~ ^\[.*\]$ ]]; then 
-                local mov_store_op="4889"
-                if (( src_reg_num >= 0 && $(get_reg_size "$src") == 1 )); then
-                    mov_store_op="88"
+                # mov [mem], reg
+                local src_size=$(get_reg_size "$src")
+                local rex=$(get_rex_for_reg "$src")
+                local mop="89"
+                if (( src_size == 1 )); then
+                    mop="88"
                 fi
-                hex_code=$(assemble_mem_operand "$dst" "${regs[$src]}" "$mov_store_op")
+                hex_code=$(assemble_mem_operand "$dst" "${regs[$src]}" "${rex}${mop}")
                 text_hex+=$hex_code
                 current_address=$((current_address + ${#hex_code}/2))
             elif [[ "$src" =~ ^\[.*\]$ ]]; then 
-                local mov_load_op="488b"
-                if (( dst_reg_num >= 0 && $(get_reg_size "$dst") == 1 )); then
-                    mov_load_op="8a"
+                # mov reg, [mem]
+                local dst_size=$(get_reg_size "$dst")
+                local rex=$(get_rex_for_reg "$dst")
+                local mop="8b"
+                if (( dst_size == 1 )); then
+                    mop="8a"
                 fi
-                hex_code=$(assemble_mem_operand "$src" "${regs[$dst]}" "$mov_load_op")
+                hex_code=$(assemble_mem_operand "$src" "${regs[$dst]}" "${rex}${mop}")
                 text_hex+=$hex_code
                 current_address=$((current_address + ${#hex_code}/2))
             elif (( dst_reg_num >= 0 )) && [[ "$src" =~ ^(-?[0-9]+|0x[0-9a-fA-F]+)$ ]]; then
+                # mov reg, imm
                 local byte_reg="$dst"
                 local byte_val=0
                 if [[ "$src" =~ ^0x([0-9a-fA-F]+)$ ]]; then
@@ -245,6 +316,7 @@ second_pass() {
                     byte_val=$((src))
                 fi
                 local reg_size=$(get_reg_size "$byte_reg")
+                local rex=$(get_rex_for_reg "$byte_reg")
                 if (( reg_size == 1 )); then
                     if [[ "$byte_reg" == "spl" || "$byte_reg" == "bpl" || "$byte_reg" == "sil" || "$byte_reg" == "dil" ]]; then
                         text_hex+=$(printf "40%02x%02x" $((0xb0 + dst_reg_num)) $((byte_val & 0xff)) )
@@ -257,15 +329,17 @@ second_pass() {
                     current_address=$((current_address + 5))
                 elif (( byte_val >= -2147483648 && byte_val <= 2147483647 )); then
                     local opcode=$((0xc0 + dst_reg_num))
-                    text_hex+=$(printf "48c7%02x" "$opcode")$(u32le $byte_val)
-                    current_address=$((current_address + 7))
+                    text_hex+="${rex}c7$(printf "%02x" "$opcode")"$(u32le $byte_val)
+                    local isize=$((6 + ${#rex}/2))
+                    current_address=$((current_address + isize))
                 else
                     local op=$((0xb8 + dst_reg_num))
-                    text_hex+=$(printf "48%02x" "$op")$(u64le $byte_val)
-                    current_address=$((current_address + 10))
+                    text_hex+="${rex}$(printf "%02x" "$op")"$(u64le $byte_val)
+                    local isize=$((9 + ${#rex}/2))
+                    current_address=$((current_address + isize))
                 fi
             else
-                
+                # mov reg, label/equ/immediate
                 local reg="$dst"
                 local arg="$src"
                 local val_is_immediate=0
@@ -291,15 +365,16 @@ second_pass() {
                 else
                     val_is_immediate=0
                 fi
+                local rex=$(get_rex_for_reg "$reg")
                 if [[ "$val_is_immediate" -eq 1 ]]; then
                     if (( val >= -2147483648 && val <= 2147483647 )); then
                         opcode=$((0xc0 + regs[$reg]))
-                        text_hex+=$(printf "48c7%02x" "$opcode")$(u32le $val)
-                        current_address=$((current_address + 7))
+                        text_hex+="${rex}c7$(printf "%02x" "$opcode")"$(u32le $val)
+                        current_address=$((current_address + 6 + ${#rex}/2))
                     else
                         op=$((0xb8 + regs[$reg]))
-                        text_hex+=$(printf "48%02x" "$op")$(u64le $val)
-                        current_address=$((current_address + 10))
+                        text_hex+="${rex}$(printf "%02x" "$op")"$(u64le $val)
+                        current_address=$((current_address + 9 + ${#rex}/2))
                     fi
                 else
                     op=$((0xb8 + regs[$reg]))
@@ -319,8 +394,8 @@ second_pass() {
                         echo "error at line $line_number: unknown label '$arg' in mov instruction '$line'" >&2
                         return 1
                     fi
-                    text_hex+=$(printf "48%02x" "$op")$(u64le $addr)
-                    current_address=$((current_address + 10))
+                    text_hex+="${rex}$(printf "%02x" "$op")"$(u64le $addr)
+                    current_address=$((current_address + 9 + ${#rex}/2))
                 fi
             fi
         elif [[ "$line" =~ $cmov_pattern ]]; then
@@ -347,9 +422,9 @@ second_pass() {
             *) echo "unknown cmov condition $cond" >&2; return 1 ;;
             esac
             mod_rm=$((0xc0 | (regs[$dst] << 3) | regs[$src]))
-            text_hex+="48"
-            text_hex+=$(printf "0f%02x%02x" "$cc" "$mod_rm")
-            current_address=$((current_address + 4))
+            local rex=$(get_rex_for_reg "$dst")
+            text_hex+="${rex}0f$(printf "%02x%02x" "$cc" "$mod_rm")"
+            current_address=$((current_address + 3 + ${#rex}/2))
         elif [[ "$line" =~ ^(syscall|nop|ret|leave|cqo|cdqe)$ ]]; then
             
             case "$line" in
@@ -362,11 +437,13 @@ second_pass() {
             esac
         elif [[ "$line" =~ ^xor[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
             reg="${BASH_REMATCH[1]}"
+            local rex=$(get_rex_for_reg "$reg")
             mod_rm=$((0xc0 + regs[$reg] * 8 + regs[$reg]))
-            text_hex+=$(printf "4831%02x" $mod_rm)
-            current_address=$((current_address + 3))
+            text_hex+="${rex}31$(printf "%02x" $mod_rm)"
+            current_address=$((current_address + 2 + ${#rex}/2))
         elif [[ "$line" =~ ^push[[:space:]]+([er][a-z]{2})$ ]]; then
             reg="${BASH_REMATCH[1]}"
+            # In 64-bit mode, push/pop only use 64-bit registers
             op=$((0x50 + regs[$reg]))
             text_hex+=$(printf "%02x" $op)
             current_address=$((current_address + 1))
@@ -461,23 +538,26 @@ second_pass() {
             dst=$(trim_string "$dst")
             src=$(trim_string "$src")
             if [[ "$dst" =~ ^[er][a-z]{2}$ && "$src" =~ ^[er][a-z]{2}$ ]]; then
-                
+                # reg, reg
                 local reg1="$dst"
                 local reg2="$src"
+                local rex=$(get_rex_for_reg "$dst")
                 local mod_rm=$((0xc0 | (regs[$reg2] << 3) | regs[$reg1]))
+                local asize=2
+                [[ -n "$rex" ]] && asize=$((asize + 1))
                 case "$op" in
-                add) text_hex+=$(printf "4801%02x" $mod_rm) ;;
-                sub) text_hex+=$(printf "4829%02x" $mod_rm) ;;
-                and) text_hex+=$(printf "4821%02x" $mod_rm) ;;
-                or) text_hex+=$(printf "4809%02x" $mod_rm) ;;
-                cmp) text_hex+=$(printf "4839%02x" $mod_rm) ;;
+                add) text_hex+="${rex}01$(printf "%02x" $mod_rm)" ;;
+                sub) text_hex+="${rex}29$(printf "%02x" $mod_rm)" ;;
+                and) text_hex+="${rex}21$(printf "%02x" $mod_rm)" ;;
+                or) text_hex+="${rex}09$(printf "%02x" $mod_rm)" ;;
+                cmp) text_hex+="${rex}39$(printf "%02x" $mod_rm)" ;;
                 esac
-                current_address=$((current_address + 3))
+                current_address=$((current_address + asize))
             elif [[ "$dst" =~ ^\[.*\]$ || "$src" =~ ^\[.*\]$ ]]; then
-                
+                # arith with mem operand
                 assemble_arith_mem "$op" "$dst" "$src"
             else
-                
+                # reg, imm
                 local reg="$dst"
                 local arg="$src"
                 if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
@@ -488,30 +568,33 @@ second_pass() {
                     echo "error: unknown immediate value '$arg' in '$line'" >&2
                     return 1
                 fi
+                local rex
                 if [[ "$reg" == "rax" ]]; then
+                    rex=$(get_rex_for_reg "$reg")
                     case "$op" in
                     add)
-                        text_hex+="4881c0$(u32le $val)"
-                        current_address=$((current_address + 7))
+                        text_hex+="${rex}05$(u32le $val)"
+                        current_address=$((current_address + 5 + ${#rex}/2))
                         ;;
                     sub)
-                        text_hex+="4881e8$(u32le $val)"
-                        current_address=$((current_address + 7))
+                        text_hex+="${rex}2d$(u32le $val)"
+                        current_address=$((current_address + 5 + ${#rex}/2))
                         ;;
                     or)
-                        text_hex+="4881c8$(u32le $val)"
-                        current_address=$((current_address + 7))
+                        text_hex+="${rex}0d$(u32le $val)"
+                        current_address=$((current_address + 5 + ${#rex}/2))
                         ;;
                     and)
-                        text_hex+="4881e0$(u32le $val)"
-                        current_address=$((current_address + 7))
+                        text_hex+="${rex}25$(u32le $val)"
+                        current_address=$((current_address + 5 + ${#rex}/2))
                         ;;
                     cmp)
-                        text_hex+="483d$(u32le $val)"
-                        current_address=$((current_address + 6))
+                        text_hex+="${rex}3d$(u32le $val)"
+                        current_address=$((current_address + 5 + ${#rex}/2))
                         ;;
                     esac
                 else
+                    rex=$(get_rex_for_reg "$reg")
                     op_ext=0
                     case "$op" in
                     add) op_ext=0 ;;
@@ -520,9 +603,16 @@ second_pass() {
                     or) op_ext=1 ;;
                     and) op_ext=4 ;;
                     esac
-                    mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-                    text_hex+=$(printf "4883%02x%02x" "$mod_rm" $((val & 0xff)))
-                    current_address=$((current_address + 4))
+                    # Check if imm8 is sufficient
+                    if (( val >= -128 && val <= 127 )); then
+                        mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
+                        text_hex+="${rex}83$(printf "%02x%02x" "$mod_rm" $((val & 0xff)))"
+                        current_address=$((current_address + 3 + ${#rex}/2))
+                    else
+                        mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
+                        text_hex+="${rex}81$(printf "%02x" "$mod_rm")"$(u32le $val)
+                        current_address=$((current_address + 6 + ${#rex}/2))
+                    fi
                 fi
             fi
         elif [[ "$line" =~ ^(je|jne|jg|jl|jge|jle|ja|jb|jae|jbe|jo|jno|js|jns|jmp|loop|loope|loopne)[[:space:]]+(.*)$ ]]; then
@@ -565,7 +655,6 @@ second_pass() {
                     *) error_msg "unsupported jump for extern: $op" ;;
                 esac
             else
-                # near encoding for jmp/cond jumps, short for loops
                 if [[ "$op" == "jmp" ]]; then
                     local target=${labels[$lbl]}
                     local offset=$((target - (current_address + 5)))
@@ -608,23 +697,24 @@ second_pass() {
         elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+([er][a-z]{2})$ ]]; then
             op="${BASH_REMATCH[1]}"
             reg="${BASH_REMATCH[2]}"
+            local rex=$(get_rex_for_reg "$reg")
             op_ext=0
             if [[ "$op" == "inc" ]]; then
                 mod_rm=$((0xc0 + regs[$reg]))
-                text_hex+=$(printf "48ff%02x" $mod_rm)
+                text_hex+="${rex}ff$(printf "%02x" $mod_rm)"
             elif [[ "$op" == "dec" ]]; then
                 mod_rm=$((0xc8 + regs[$reg]))
-                text_hex+=$(printf "48ff%02x" $mod_rm)
+                text_hex+="${rex}ff$(printf "%02x" $mod_rm)"
             elif [[ "$op" == "neg" ]]; then
                 op_ext=3
                 mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-                text_hex+=$(printf "48f7%02x" $mod_rm)
+                text_hex+="${rex}f7$(printf "%02x" $mod_rm)"
             elif [[ "$op" == "not" ]]; then
                 op_ext=2
                 mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-                text_hex+=$(printf "48f7%02x" $mod_rm)
+                text_hex+="${rex}f7$(printf "%02x" $mod_rm)"
             fi
-            current_address=$((current_address + 3))
+            current_address=$((current_address + 2 + ${#rex}/2))
 
         elif [[ "$line" =~ ^call[[:space:]]+([er][a-z]{2})$ ]]; then
             local call_reg="${BASH_REMATCH[1]}"
@@ -656,6 +746,7 @@ second_pass() {
         elif [[ "$line" =~ ^(mul|div|idiv)[[:space:]]+([er][a-z]{2})$ ]]; then
             op="${BASH_REMATCH[1]}"
             reg="${BASH_REMATCH[2]}"
+            local rex=$(get_rex_for_reg "$reg")
             op_ext=0
             case "$op" in
             mul) op_ext=4 ;;
@@ -663,13 +754,14 @@ second_pass() {
             idiv) op_ext=7 ;;
             esac
             mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-            text_hex+=$(printf "48f7%02x" $mod_rm)
-            current_address=$((current_address + 3))
+            text_hex+="${rex}f7$(printf "%02x" $mod_rm)"
+            current_address=$((current_address + 2 + ${#rex}/2))
         elif [[ "$line" =~ $imul_mem_pattern ]]; then
             local ireg="${BASH_REMATCH[1]}"
             local imem_content="${BASH_REMATCH[2]}"
             local imem_op="[$imem_content]"
-            local ihex=$(assemble_mem_operand "$imem_op" "${regs[$ireg]}" "480faf")
+            local rex=$(get_rex_for_reg "$ireg")
+            local ihex=$(assemble_mem_operand "$imem_op" "${regs[$ireg]}" "${rex}0faf")
             text_hex+=$ihex
             current_address=$((current_address + ${#ihex}/2))
         
@@ -686,25 +778,26 @@ second_pass() {
                 error_msg "invalid immediate '$i3imm' in imul"
                 return 1
             fi
+            local rex=$(get_rex_for_reg "$i3dst")
             if [[ "$i3src" =~ ^[er][a-z]{2}$ ]]; then
                 if (( i3val >= -128 && i3val <= 127 )); then
                     local i3mod=$((0xc0 | (regs[$i3dst] << 3) | regs[$i3src]))
-                    text_hex+=$(printf "486b%02x%02x" $i3mod $((i3val & 0xff)))
-                    current_address=$((current_address + 4))
+                    text_hex+="${rex}6b$(printf "%02x%02x" $i3mod $((i3val & 0xff)))"
+                    current_address=$((current_address + 3 + ${#rex}/2))
                 else
                     local i3mod=$((0xc0 | (regs[$i3dst] << 3) | regs[$i3src]))
-                    text_hex+=$(printf "4869%02x" $i3mod)$(u32le $i3val)
-                    current_address=$((current_address + 7))
+                    text_hex+="${rex}69$(printf "%02x" $i3mod)"$(u32le $i3val)
+                    current_address=$((current_address + 6 + ${#rex}/2))
                 fi
             else
-                local i3opcode="4869"
+                local i3opcode="69"
                 if (( i3val >= -128 && i3val <= 127 )); then
-                    i3opcode="486b"
+                    i3opcode="6b"
                 fi
-                local i3hex=$(assemble_mem_operand "$i3src" "${regs[$i3dst]}" "$i3opcode")
+                local i3hex=$(assemble_mem_operand "$i3src" "${regs[$i3dst]}" "${rex}${i3opcode}")
                 text_hex+=$i3hex
                 current_address=$((current_address + ${#i3hex}/2))
-                if [[ "$i3opcode" == "486b" ]]; then
+                if [[ "$i3opcode" == "6b" ]]; then
                     text_hex+=$(printf "%02x" $((i3val & 0xff)))
                     current_address=$((current_address + 1))
                 else
@@ -716,28 +809,46 @@ second_pass() {
         elif [[ "$line" =~ ^imul[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
             reg1="${BASH_REMATCH[1]}"
             reg2="${BASH_REMATCH[2]}"
+            local rex=$(get_rex_for_reg "$reg1")
             mod_rm=$((0xc0 | (regs[$reg1] << 3) | regs[$reg2]))
-            text_hex+=$(printf "480faf%02x" $mod_rm)
-            current_address=$((current_address + 4))
-            elif [[ "$line" =~ ^lea[[:space:]]+([er][a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
-                reg="${BASH_REMATCH[1]}"
-                lbl="${BASH_REMATCH[2]}"
-                # Check if lbl is actually a register name (not a label)
-                local l_lbl_num=$(get_reg_num "$lbl")
-                if (( l_lbl_num >= 0 )); then
-                    # It's a register, use register form via lea_mem_pattern
-                    local lmem_op="[$lbl]"
-                    local lhex=$(assemble_mem_operand "$lmem_op" "${regs[$reg]}" "488d")
-                    text_hex+=$lhex
-                    current_address=$((current_address + ${#lhex}/2))
-                else
-                    mod_rm=$(((regs[$reg] << 3) | 5))
-                    text_hex+=$(printf "488d%02x" $mod_rm)
-                    relocations+=("$((current_address + 3)):${lbl}:2:-4")
-                    text_hex+="00000000"
-                    current_address=$((current_address + 7))
-                fi
-        elif [[ "$line" =~ $lea_mem_pattern ]]; then
+            text_hex+="${rex}0faf$(printf "%02x" $mod_rm)"
+            current_address=$((current_address + 3 + ${#rex}/2))
+        elif [[ "$line" =~ ^lea[[:space:]]+([er][a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
+            reg="${BASH_REMATCH[1]}"
+            lbl="${BASH_REMATCH[2]}"
+            local l_lbl_num=$(get_reg_num "$lbl")
+            if (( l_lbl_num >= 0 )); then
+                # It's a register, use register form
+                local lmem_op="[$lbl]"
+                local lhex=$(assemble_mem_operand "$lmem_op" "${regs[$reg]}" "488d")
+                text_hex+=$lhex
+                current_address=$((current_address + ${#lhex}/2))
+            else
+                mod_rm=$(((regs[$reg] << 3) | 5))
+                text_hex+=$(printf "488d%02x" $mod_rm)
+                relocations+=("$((current_address + 3)):${lbl}:2:-4")
+                text_hex+="00000000"
+                current_address=$((current_address + 7))
+            fi
+        elif [[ "$line" =~ ^lea[[:space:]]+([er][a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
+            local lr_reg="${BASH_REMATCH[1]}"
+            local lr_lbl="${BASH_REMATCH[2]}"
+            local lr_lbl_num=$(get_reg_num "$lr_lbl")
+            if (( lr_lbl_num >= 0 )); then
+                # It'"'"'s a register name, use register form via lea_mem_pattern
+                local lmem_op="[$lr_lbl]"
+                local lhex=$(assemble_mem_operand "$lmem_op" "${regs[$lr_reg]}" "488d")
+                text_hex+=$lhex
+                current_address=$((current_address + ${#lhex}/2))
+            else
+                local mod_rm=$(((regs[$lr_reg] << 3) | 5))
+                text_hex+=$(printf "488d%02x" $mod_rm)
+                relocations+=("$((current_address + 3)):${lr_lbl}:2:-4")
+                text_hex+="00000000"
+                current_address=$((current_address + 7))
+            fi
+        
+                elif [[ "$line" =~ $lea_mem_pattern ]]; then
             local lreg="${BASH_REMATCH[1]}"
             local lmem_content="${BASH_REMATCH[2]}"
             local lmem_op="[$lmem_content]"
@@ -765,6 +876,7 @@ second_pass() {
             op="${BASH_REMATCH[1]}"
             reg="${BASH_REMATCH[2]}"
             val="${BASH_REMATCH[3]}"
+            local rex=$(get_rex_for_reg "$reg")
             op_ext=0
             if [[ "$op" == "shl" ]]; then
                 op_ext=4
@@ -773,15 +885,17 @@ second_pass() {
             elif [[ "$op" == "sar" ]]; then
                 op_ext=7
             fi
+            # Use c1 for imm8 shifts, d3 for variable shift by cl
             mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
-            text_hex+=$(printf "48c1%02x%02x" $mod_rm $((val & 0xff)))
-            current_address=$((current_address + 4))
+            text_hex+="${rex}c1$(printf "%02x%02x" $mod_rm $val)"
+            current_address=$((current_address + 3 + ${#rex}/2))
         elif [[ "$line" =~ ^test[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
             reg1="${BASH_REMATCH[1]}"
             reg2="${BASH_REMATCH[2]}"
+            local rex=$(get_rex_for_reg "$reg1")
             mod_rm=$((0xc0 | (regs[$reg2] << 3) | regs[$reg1]))
-            text_hex+=$(printf "4885%02x" $mod_rm)
-            current_address=$((current_address + 3))
+            text_hex+="${rex}85$(printf "%02x" $mod_rm)"
+            current_address=$((current_address + 2 + ${#rex}/2))
         elif [[ "$line" =~ ^test[[:space:]]+([er][a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
             reg="${BASH_REMATCH[1]}"
             arg="${BASH_REMATCH[2]}"
@@ -790,9 +904,10 @@ second_pass() {
             else
                 val=$((arg))
             fi
+            local rex=$(get_rex_for_reg "$reg")
             mod_rm=$((0xc0 | regs[$reg]))
-            text_hex+=$(printf "48f7%02x" "$mod_rm")$(u32le "$val")
-            current_address=$((current_address + 7))
+            text_hex+="${rex}f7$(printf "%02x" "$mod_rm")"$(u32le "$val")
+            current_address=$((current_address + 6 + ${#rex}/2))
         elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|dil|sil|bpl|spl|[er][a-z]{2})$ ]]; then
             cond="${BASH_REMATCH[1]}"
             dst="${BASH_REMATCH[2]}"
@@ -801,24 +916,29 @@ second_pass() {
                 error_msg "at line $line_number: invalid destination register '$dst' in '$line'"
             fi
             mod_rm=$((0xc0 | dst_reg))
+            # setcc always operates on byte reg. spl/bpl/sil/dil need REX 40.
+            local rex=""
+            case "$dst" in
+                spl|bpl|sil|dil) rex="40" ;;
+            esac
             
             case "$cond" in
-            e|z) text_hex+=$(printf "0f94%02x" $mod_rm) ;;
-            ne|nz) text_hex+=$(printf "0f95%02x" $mod_rm) ;;
-            a) text_hex+=$(printf "0f97%02x" $mod_rm) ;;
-            ae) text_hex+=$(printf "0f93%02x" $mod_rm) ;;
-            b) text_hex+=$(printf "0f92%02x" $mod_rm) ;;
-            be) text_hex+=$(printf "0f96%02x" $mod_rm) ;;
-            g) text_hex+=$(printf "0f9f%02x" $mod_rm) ;;
-            ge) text_hex+=$(printf "0f9d%02x" $mod_rm) ;;
-            l) text_hex+=$(printf "0f9c%02x" $mod_rm) ;;
-            le) text_hex+=$(printf "0f9e%02x" $mod_rm) ;;
-            o) text_hex+=$(printf "0f90%02x" $mod_rm) ;;
-            no) text_hex+=$(printf "0f91%02x" $mod_rm) ;;
-            s) text_hex+=$(printf "0f98%02x" $mod_rm) ;;
-            ns) text_hex+=$(printf "0f99%02x" $mod_rm) ;;
+            e|z) text_hex+="${rex}0f94$(printf "%02x" $mod_rm)" ;;
+            ne|nz) text_hex+="${rex}0f95$(printf "%02x" $mod_rm)";;
+            a) text_hex+="${rex}0f97$(printf "%02x" $mod_rm)";;
+            ae) text_hex+="${rex}0f93$(printf "%02x" $mod_rm)";;
+            b) text_hex+="${rex}0f92$(printf "%02x" $mod_rm)";;
+            be) text_hex+="${rex}0f96$(printf "%02x" $mod_rm)";;
+            g) text_hex+="${rex}0f9f$(printf "%02x" $mod_rm)";;
+            ge) text_hex+="${rex}0f9d$(printf "%02x" $mod_rm)";;
+            l) text_hex+="${rex}0f9c$(printf "%02x" $mod_rm)";;
+            le) text_hex+="${rex}0f9e$(printf "%02x" $mod_rm)";;
+            o) text_hex+="${rex}0f90$(printf "%02x" $mod_rm)";;
+            no) text_hex+="${rex}0f91$(printf "%02x" $mod_rm)";;
+            s) text_hex+="${rex}0f98$(printf "%02x" $mod_rm)";;
+            ns) text_hex+="${rex}0f99$(printf "%02x" $mod_rm)";;
             esac
-            current_address=$((current_address + 3))
+            current_address=$((current_address + 3 + ${#rex}/2))
         elif [[ "$line" =~ $rep_pattern ]]; then
             local rep_instr="${BASH_REMATCH[1]}"
             text_hex+="f3"
@@ -849,6 +969,7 @@ second_pass() {
         elif [[ "$line" =~ $shift_cl_pattern ]]; then
             local scl_op="${BASH_REMATCH[1]}"
             local scl_reg="${BASH_REMATCH[2]}"
+            local rex=$(get_rex_for_reg "$scl_reg")
             local scl_ext=0
             case "$scl_op" in
                 shl) scl_ext=4 ;;
@@ -856,8 +977,8 @@ second_pass() {
                 sar) scl_ext=7 ;;
             esac
             local scl_mod_rm=$((0xc0 | (scl_ext << 3) | regs[$scl_reg]))
-            text_hex+=$(printf "48d3%02x" $scl_mod_rm)
-            current_address=$((current_address + 3))
+            text_hex+="${rex}d3$(printf "%02x" $scl_mod_rm)"
+            current_address=$((current_address + 2 + ${#rex}/2))
         elif [[ "$line" =~ $setcc_mem_pattern ]]; then
             local scond="${BASH_REMATCH[1]}"
             local smem_content="${BASH_REMATCH[3]}"
@@ -891,13 +1012,14 @@ second_pass() {
             else
                 ival=$((iimm))
             fi
+            local rex=$(get_rex_for_reg "$ireg")
             local imod=$((0xc0 | (regs[$ireg] << 3) | regs[$ireg]))
             if (( ival >= -128 && ival <= 127 )); then
-                text_hex+=$(printf "486b%02x%02x" $imod $((ival & 0xff)))
-                current_address=$((current_address + 4))
+                text_hex+="${rex}6b$(printf "%02x%02x" $imod $((ival & 0xff)))"
+                current_address=$((current_address + 3 + ${#rex}/2))
             else
-                text_hex+=$(printf "4869%02x" $imod)$(u32le $ival)
-                current_address=$((current_address + 7))
+                text_hex+="${rex}69$(printf "%02x" $imod)"$(u32le $ival)
+                current_address=$((current_address + 6 + ${#rex}/2))
             fi
         else
             error_msg "internal error assembling: $line"

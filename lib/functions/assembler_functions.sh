@@ -467,14 +467,20 @@ assemble_arith_mem() {
     local op="$1"
     local dst="$2"
     local src="$3"
-    local opcode_reg_mem 
-    local opcode_mem_reg 
+    local rex
+    if [[ "$dst" =~ ^\[.*\]$ ]]; then
+        rex=$(get_rex_for_reg "$src")
+    else
+        rex=$(get_rex_for_reg "$dst")
+    fi
+    local opcode_reg_mem
+    local opcode_mem_reg
     case "$op" in
-        add) opcode_reg_mem="4803"; opcode_mem_reg="4801" ;;
-        sub) opcode_reg_mem="482b"; opcode_mem_reg="4829" ;;
-        and) opcode_reg_mem="4823"; opcode_mem_reg="4821" ;;
-        or)  opcode_reg_mem="480b"; opcode_mem_reg="4809" ;;
-        cmp) opcode_reg_mem="483b"; opcode_mem_reg="4839" ;;
+        add) opcode_reg_mem="${rex}03"; opcode_mem_reg="${rex}01" ;;
+        sub) opcode_reg_mem="${rex}2b"; opcode_mem_reg="${rex}29" ;;
+        and) opcode_reg_mem="${rex}23"; opcode_mem_reg="${rex}21" ;;
+        or)  opcode_reg_mem="${rex}0b"; opcode_mem_reg="${rex}09" ;;
+        cmp) opcode_reg_mem="${rex}3b"; opcode_mem_reg="${rex}39" ;;
         *) echo "unsupported arith op" >&2; return 1 ;;
     esac
     if [[ "$dst" =~ ^\[.*\]$ ]]; then 
