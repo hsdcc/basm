@@ -50,9 +50,10 @@ linker_layout() {
   local a_r=$(_ll_align "$total_r" 8)
   local a_b=$(_ll_align "$total_b" 16)
 
-  # file offsets
+  # file offsets (data segment page-aligned to avoid page overlap with text)
+  local page=4096
   local f_off_t=$((0x200))
-  local f_off_d=$((f_off_t + a_t))
+  local f_off_d=$(( (f_off_t + a_t + page - 1) / page * page ))
   local f_off_r=$((f_off_d + a_d))
   local f_off_b=$((f_off_r + a_r))
 
