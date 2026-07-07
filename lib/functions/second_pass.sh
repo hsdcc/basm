@@ -138,6 +138,9 @@ second_pass() {
                     if [[ -n "${data_label_off[$arg]:-}" ]]; then
                         addr=$((data_vaddr + data_label_off[$arg]))
                         relocations+=("$((current_address + 2)):${arg}:1:0")
+                    elif [[ -n "${rodata_label_off[$arg]:-}" ]]; then
+                        addr=$((data_vaddr + rodata_label_off[$arg]))
+                        relocations+=("$((current_address + 2)):${arg}:1:0")
                     elif [[ -n "${labels[$arg]:-}" ]]; then
                         addr=$((text_vaddr + labels[$arg]))
                         relocations+=("$((current_address + 2)):${arg}:1:0")

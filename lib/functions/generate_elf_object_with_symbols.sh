@@ -22,24 +22,29 @@ generate_elf_object_with_symbols() {
     local relocations_ref="$7"
     local externals_ref="$8"
     local mode="${9:-obj}"
+    local rodata_hex="${10:-}"
+    local rodata_labels_ref="${11:-}"
     local -n labels_n="$3"
     local -n equs_n="$4"
     local -n data_labels_n="$6"
     local -n relocations_n="$7"
     local -n externals_n="$8"
+    local -A _empty_rodata_labels
+    local -n rodata_labels_n="${11:-_empty_rodata_labels}"
     local text_size=$((${#text_hex} / 2))
     local data_size=$((${#data_bytes} / 2))
+    local rodata_size=$((${#rodata_hex} / 2))
     local total_sections=7
     local header_size=64
     local text_section_off=$header_size
     local data_section_off=$((text_section_off + text_size))
     local rela_hex=""
-        if [[ ${#relocations_n[@]} -gt 0 ]]; then
-        generate_relocation_section "relocations_n" "labels_n" "data_labels_n" "externals_n" "rela_hex"
+    if [[ ${#relocations_n[@]} -gt 0 ]]; then
+        generate_relocation_section "relocations_n" "labels_n" "data_labels_n" "rodata_labels_n" "externals_n" "rela_hex"
     fi
     local rela_size=$((${#rela_hex} / 2))
-    local total_sections=6
-    [[ $rela_size -gt 0 ]] && total_sections=7
+    local total_sections=7
+    [[ $rela_size -gt 0 ]] && total_sections=8
     # build strtab with ordered iteration for deterministic offsets
     local -a _sym_names=()
     local -a _sym_shndx=()
@@ -49,6 +54,9 @@ generate_elf_object_with_symbols() {
     done
     for label_name in "${!data_labels_n[@]}"; do
         _sym_names+=("$label_name"); _sym_shndx+=(2); _sym_vals+=("${data_labels_n[$label_name]}")
+    done
+    for label_name in "${!rodata_labels_n[@]}"; do
+        _sym_names+=("$label_name"); _sym_shndx+=(3); _sym_vals+=("${rodata_labels_n[$label_name]}")
     done
     for ext_name in "${!externals_n[@]}"; do
         _sym_names+=("$ext_name"); _sym_shndx+=(0); _sym_vals+=(0)
@@ -70,9 +78,10 @@ generate_elf_object_with_symbols() {
     local symstrtab_size=$((${#symstrtab_hex} / 2))
     local num_symbols=$((1 + ${#_sym_names[@]}))
     local symtab_size=$((num_symbols * 24))
-    local shstrtab_hex="002e74657874002e64617461002e7368737472746162002e73796d746162002e73747274616200"
+    local shstrtab_hex="002e74657874002e64617461002e726f64617461002e7368737472746162002e73796d746162002e73747274616200"
     local shstrtab_size=$((${#shstrtab_hex} / 2))
-    local strtab_off=$((data_section_off + data_size))
+    local rodata_off=$((data_section_off + data_size))
+    local strtab_off=$((rodata_off + rodata_size))
     local symtab_off=$((strtab_off + symstrtab_size))
     local rela_off=$((symtab_off + symtab_size))
     local sec_header_table_off=$((rela_off + rela_size))
@@ -101,7 +110,7 @@ generate_elf_object_with_symbols() {
     elf_header+="4000"
     local shnum_hex=$(printf "%04x" $total_sections)
     elf_header+=$(reverse_endian "$shnum_hex")
-    local shstrndx_hex=$(printf "%04x" 3)
+    local shstrndx_hex=$(printf "%04x" 4)
     elf_header+=$(reverse_endian "$shstrndx_hex")
     # build symtab using ordered _sym_names arrays
     local symtab_content=""
@@ -163,7 +172,24 @@ generate_elf_object_with_symbols() {
     sh_addralign_hex=$(printf "%016x" 8)
     section_headers+=$(reverse_endian "$sh_addralign_hex")
     section_headers+="0000000000000000"
+    # Section 3: .rodata
     sh_name_hex=$(printf "%08x" 13)
+    section_headers+=$(reverse_endian "$sh_name_hex")
+    section_headers+="01000000"
+    sh_flags_hex=$(printf "%016x" $((0x2)))
+    section_headers+=$(reverse_endian "$sh_flags_hex")
+    section_headers+="0000000000000000"
+    sh_offset_hex=$(printf "%016x" $rodata_off)
+    section_headers+=$(reverse_endian "$sh_offset_hex")
+    sh_size_hex=$(printf "%016x" $rodata_size)
+    section_headers+=$(reverse_endian "$sh_size_hex")
+    section_headers+="00000000"
+    section_headers+="00000000"
+    sh_addralign_hex=$(printf "%016x" 8)
+    section_headers+=$(reverse_endian "$sh_addralign_hex")
+    section_headers+="0000000000000000"
+    # Section 4: .shstrtab
+    sh_name_hex=$(printf "%08x" 21)
     section_headers+=$(reverse_endian "$sh_name_hex")
     section_headers+="03000000"
     sh_flags_hex=$(printf "%016x" 0)
@@ -179,7 +205,8 @@ generate_elf_object_with_symbols() {
     sh_addralign_hex=$(printf "%016x" 1)
     section_headers+=$(reverse_endian "$sh_addralign_hex")
     section_headers+="0000000000000000"
-    sh_name_hex=$(printf "%08x" 23)
+    # Section 5: .symtab
+    sh_name_hex=$(printf "%08x" 31)
     section_headers+=$(reverse_endian "$sh_name_hex")
     section_headers+="02000000"
     sh_flags_hex=$(printf "%016x" 0)
@@ -189,14 +216,15 @@ generate_elf_object_with_symbols() {
     section_headers+=$(reverse_endian "$sh_offset_hex")
     sh_size_hex=$(printf "%016x" $symtab_size)
     section_headers+=$(reverse_endian "$sh_size_hex")
-    local link_idx_hex=$(printf "%08x" 5)
+    local link_idx_hex=$(printf "%08x" 6)
     section_headers+=$(reverse_endian "$link_idx_hex")
     section_headers+="00000000"
     sh_addralign_hex=$(printf "%016x" 8)
     section_headers+=$(reverse_endian "$sh_addralign_hex")
     local entsize_hex=$(printf "%016x" 24)
     section_headers+=$(reverse_endian "$entsize_hex")
-    sh_name_hex=$(printf "%08x" 31)
+    # Section 6: .strtab
+    sh_name_hex=$(printf "%08x" 39)
     section_headers+=$(reverse_endian "$sh_name_hex")
     section_headers+="03000000"
     sh_flags_hex=$(printf "%016x" 0)
@@ -212,7 +240,8 @@ generate_elf_object_with_symbols() {
     section_headers+=$(reverse_endian "$sh_addralign_hex")
     section_headers+="0000000000000000"
     if [[ $rela_size -gt 0 ]]; then
-        sh_name_hex=$(printf "%08x" 39)
+        # Section 7: .rela.text
+        sh_name_hex=$(printf "%08x" 47)
         section_headers+=$(reverse_endian "$sh_name_hex")
         section_headers+="04000000"
         sh_flags_hex=$(printf "%016x" 0)
@@ -222,7 +251,7 @@ generate_elf_object_with_symbols() {
         section_headers+=$(reverse_endian "$sh_offset_hex")
         sh_size_hex=$(printf "%016x" $rela_size)
         section_headers+=$(reverse_endian "$sh_size_hex")
-        local rela_link_hex=$(printf "%08x" 4)
+        local rela_link_hex=$(printf "%08x" 5)
         section_headers+=$(reverse_endian "$rela_link_hex")
         local rela_info_hex=$(printf "%08x" 1)
         section_headers+=$(reverse_endian "$rela_info_hex")
@@ -236,6 +265,7 @@ generate_elf_object_with_symbols() {
     hex_to_bin "$elf_header" >"$tmpf"
     hex_to_bin "$text_hex" >>"$tmpf"
     hex_to_bin "$data_bytes" >>"$tmpf"
+    [[ -n "$rodata_hex" ]] && hex_to_bin "$rodata_hex" >>"$tmpf"
     hex_to_bin "$symstrtab_hex" >>"$tmpf"
     hex_to_bin "$symtab_content" >>"$tmpf"
     [[ $rela_size -gt 0 ]] && hex_to_bin "$rela_hex" >>"$tmpf"
