@@ -11,7 +11,7 @@ read_file_hex() {
         if [[ $count_bytes -eq 0 ]]; then
             return 0
         fi
-        _rfh_output=$(dd if="$file_path" bs=1 skip="$skip_bytes" count="$count_bytes" 2>/dev/null | od -An -tx1 | tr -d ' \n')
+        _rfh_output=$(dd if="$file_path" bs=1 skip="$skip_bytes" count="$count_bytes" 2>/dev/null | od -v -An -tx1 | tr -d ' \n')
     fi
     return 0
 }
