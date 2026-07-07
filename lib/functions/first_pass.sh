@@ -208,13 +208,54 @@ first_pass() {
             
             elif [[ "$line" =~ ^(syscall|nop|ret|leave|cqo|cdqe)$ ]]; then
                 calculate_simple_instr_size
+                elif [[ "$line" =~ $string_op_pattern ]]; then
+                    case "$line" in
+                        movsb|movsl|stosb|stosl|lodsb|lodsl|scasb|scasl|cmpsb|cmpsl|cld|std) text_bytes_len=$((text_bytes_len + 1)) ;;
+                        movsw|movsq|stosw|stosq|lodsw|lodsq|scasw|scasq|cmpsw|cmpsq) text_bytes_len=$((text_bytes_len + 2)) ;;
+                    esac
+
             
                 elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
             
             elif [[ "$line" =~ ^(push|pop)[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 1))
-            
+
+            elif [[ "$line" =~ $push_imm_pattern ]]; then
+                arg="${BASH_REMATCH[1]}"
+                if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
+                    val=$((16#${BASH_REMATCH[1]}))
+                else
+                    val=$((arg))
+                fi
+                if (( val >= -128 && val <= 127 )); then
+                    text_bytes_len=$((text_bytes_len + 2))
+                else
+                    text_bytes_len=$((text_bytes_len + 5))
+                fi
+            elif [[ "$line" =~ $push_equsym_pattern ]]; then
+                sym="${BASH_REMATCH[1]}"
+                if [[ -n "${equs[$sym]:-}" ]]; then
+                    val=${equs[$sym]}
+                    if (( val >= -128 && val <= 127 )); then
+                        text_bytes_len=$((text_bytes_len + 2))
+                    else
+                        text_bytes_len=$((text_bytes_len + 5))
+                    fi
+                else
+                    text_bytes_len=$((text_bytes_len + 5))
+                fi
+            elif [[ "$line" =~ $push_mem_pattern ]]; then
+                base="${BASH_REMATCH[2]}"
+                disp="${BASH_REMATCH[3]:-}"
+                size=$(calc_mem_addr_size "$base" "$disp")
+                text_bytes_len=$((text_bytes_len + size))
+            elif [[ "$line" =~ $pop_mem_pattern ]]; then
+                base="${BASH_REMATCH[2]}"
+                disp="${BASH_REMATCH[3]:-}"
+                size=$(calc_mem_addr_size "$base" "$disp")
+                text_bytes_len=$((text_bytes_len + size))
+
             elif [[ "$line" =~ ^(add|sub|cmp|or|and)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
             
@@ -250,8 +291,46 @@ first_pass() {
             elif [[ "$line" =~ ^(mul|div|idiv)[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
             
+            elif [[ "$line" =~ $mul_mem_pattern ]]; then
+                local mbase="${BASH_REMATCH[2]}"
+                local mdisp="${BASH_REMATCH[3]:-}"
+                local msize=$(calc_mem_addr_size "$mbase" "$mdisp")
+                text_bytes_len=$((text_bytes_len + msize))
+            
             elif [[ "$line" =~ ^(imul)[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
+            
+            elif [[ "$line" =~ $imul_mem_pattern ]]; then
+                local ibase="${BASH_REMATCH[2]}"
+                local idisp="${BASH_REMATCH[3]:-}"
+                local isize=$(calc_mem_addr_size "$ibase" "$idisp")
+                text_bytes_len=$((text_bytes_len + isize + 1))
+            
+            elif [[ "$line" =~ $imul3_pattern ]]; then
+                local i3src="${BASH_REMATCH[2]}"
+                local i3imm="${BASH_REMATCH[3]}"
+                if [[ "$i3src" =~ ^r[a-z]{2}$ ]]; then
+                    local i3val=0
+                    [[ "$i3imm" =~ ^-?[0-9]+$ ]] && i3val=$((i3imm))
+                    if (( i3val >= -128 && i3val <= 127 )); then
+                        text_bytes_len=$((text_bytes_len + 4))
+                    else
+                        text_bytes_len=$((text_bytes_len + 7))
+                    fi
+                else
+                    if [[ "$i3src" =~ \[(r[a-z]{2})([\+\-][0-9]+)?\] ]]; then
+                        local ebase="${BASH_REMATCH[1]}"
+                        local edisp="${BASH_REMATCH[2]:-}"
+                        local esize=$(calc_mem_addr_size "$ebase" "$edisp")
+                        local eVal=0
+                        [[ "$i3imm" =~ ^-?[0-9]+$ ]] && eVal=$((i3imm))
+                        if (( eVal >= -128 && eVal <= 127 )); then
+                            text_bytes_len=$((text_bytes_len + esize + 1))
+                        else
+                            text_bytes_len=$((text_bytes_len + esize + 4))
+                        fi
+                    fi
+                fi
             
             elif [[ "$line" =~ ^lea[[:space:]]+(r[a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
                 text_bytes_len=$((text_bytes_len + 7))
