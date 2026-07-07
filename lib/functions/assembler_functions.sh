@@ -157,7 +157,7 @@ assemble_arith() {
             else
                 error_msg "unknown immediate value '$arg' in '$mnemonic'"
             fi
-            if [[ "$reg" == "rax" ]]; then
+            if [[ "$reg" == "rax" || "$reg" == "eax" ]]; then
                 case "$mnemonic" in
                     add)
                         text_hex+="4881c0$(u32le $val)"
@@ -222,7 +222,7 @@ assemble_mem_operand() {
         
         if (( disp == 0 )); then
             mod=0
-            if [[ "$base_reg" == "rbp" || "$base_reg" == "r13" ]]; then
+            if [[ "$base_reg" == "rbp" || "$base_reg" == "r13" || "$base_reg" == "ebp" ]]; then
                 mod=1
                 disp_hex="00"
             fi
@@ -234,7 +234,7 @@ assemble_mem_operand() {
             disp_hex=$(u32le "$disp")
         fi
         rm=${regs[$base_reg]}
-        if [[ "$base_reg" == "rsp" || "$base_reg" == "r12" ]]; then
+        if [[ "$base_reg" == "rsp" || "$base_reg" == "r12" || "$base_reg" == "esp" ]]; then
             rm=4 
             sib="24" 
         fi
@@ -313,19 +313,19 @@ calc_sse_mem_size() {
     local size=$prefix_len
     (( size++ ))
     if [[ -z "$disp" ]]; then
-        if [[ "$base" == "rbp" || "$base" == "r13" ]]; then
+        if [[ "$base" == "rbp" || "$base" == "r13" || "$base" == "ebp" ]]; then
             (( size++ ))
-        elif [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+        elif [[ "$base" == "rsp" || "$base" == "r12" || "$base" == "esp" ]]; then
             (( size++ ))
         fi
     elif (( disp >= -128 && disp <= 127 )); then
         (( size++ ))
-        if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+        if [[ "$base" == "rsp" || "$base" == "r12" || "$base" == "esp" ]]; then
             (( size++ ))
         fi
     else
         (( size += 4 ))
-        if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
+        if [[ "$base" == "rsp" || "$base" == "r12" || "$base" == "esp" ]]; then
             (( size++ ))
         fi
     fi
