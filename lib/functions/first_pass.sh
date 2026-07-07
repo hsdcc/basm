@@ -32,6 +32,13 @@ first_pass() {
         line_number=$((line_number + 1))
         line="${raw%%;*}"
         line="$(trim_string "$line")"
+            # Strip size keywords before mem operands
+            if [[ "$line" =~ (byte|word|dword|qword)[[:space:]]+\[ ]]; then
+                line="${line//dword [/[}"
+                line="${line//qword [/[}"
+                line="${line//word [/[}"
+                line="${line//byte [/[}"
+            fi
         [ -z "$line" ] && continue
         case "$line" in
         section\ .data)

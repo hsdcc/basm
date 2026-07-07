@@ -7,6 +7,13 @@ second_pass() {
     current_address=0
     
     for line in "${ins_array[@]}"; do
+            # Strip size keywords before mem operands
+            if [[ "$line" =~ (byte|word|dword|qword)[[:space:]]+\[ ]]; then
+                line="${line//dword [/[}"
+                line="${line//qword [/[}"
+                line="${line//word [/[}"
+                line="${line//byte [/[}"
+            fi
         
         if [[ "$line" =~ $movss_rr_pattern ]]; then
             handle_fp_operation "movss_rr" 4
