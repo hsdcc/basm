@@ -38,7 +38,7 @@ calc_mem_addr_size() {
     local disp="$2"
     
     local size=4
-    if [[ "$base" == "rsp" || "$base" == "r12" || "$base" == "esp" ]]; then
+    if [[ "$base" == "rsp" || "$base" == "r12" ]]; then
         if [[ -z "$disp" ]]; then
             size=3
         else
@@ -51,7 +51,7 @@ calc_mem_addr_size() {
     else
         if [[ -z "$disp" ]]; then
             size=3
-        elif [[ "$base" == "rbp" || "$base" == "r13" || "$base" == "ebp" ]]; then
+        elif [[ "$base" == "rbp" || "$base" == "r13" ]]; then
             size=4
         else
             if (( disp >= -128 && disp <= 127 )); then
@@ -65,12 +65,12 @@ calc_mem_addr_size() {
 }
 calculate_mov_size() {
     arg="${BASH_REMATCH[2]}"
-    if [[ "$arg" =~ ^\[([er][a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
+    if [[ "$arg" =~ ^\[(r[a-z]{2})([\+\-][0-9]+)?\]$ ]]; then
         base="${BASH_REMATCH[1]}"
         disp="${BASH_REMATCH[2]:-}"
         size=$(calc_mem_addr_size "$base" "$disp")
         text_bytes_len=$((text_bytes_len + size))
-    elif [[ "$arg" =~ ^\[([er][a-z]{2})([\+\-][0-9]+)?\],[[:space:]]+([er][a-z]{2})$ ]]; then
+    elif [[ "$arg" =~ ^\[(r[a-z]{2})([\+\-][0-9]+)?\],[[:space:]]+(r[a-z]{2})$ ]]; then
         base="${BASH_REMATCH[1]}"
         disp="${BASH_REMATCH[2]:-}"
         size=$(calc_mem_addr_size "$base" "$disp")
@@ -95,7 +95,7 @@ calculate_mov_size() {
 calculate_arith_ri_size() {
     reg="${BASH_REMATCH[2]}"
     arg="${BASH_REMATCH[3]}"
-    if [[ "$reg" == "rax" || "$reg" == "eax" ]]; then
+    if [[ "$reg" == "rax" ]]; then
         if [[ "$line" =~ ^cmp.*$ ]]; then
             text_bytes_len=$((text_bytes_len + 6))
         else

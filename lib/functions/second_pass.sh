@@ -90,7 +90,7 @@ second_pass() {
             mod_rm=$((0xc0 | regs[$reg] << 3 | xmm_regs[$xmm]))
             text_hex+="${fp_opcodes["cvtsd2si"]}$(printf "%02x" $mod_rm)"
             current_address=$((current_address + 4))
-        elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+([er][a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh]|[er][a-z]{2})$ ]]; then
+        elif [[ "$line" =~ ^(movzx|movsx)[[:space:]]+(r[a-z]{2}),[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
             op="${BASH_REMATCH[1]}"
             dst="${BASH_REMATCH[2]}"
             src="${BASH_REMATCH[3]}"
@@ -111,7 +111,7 @@ second_pass() {
                 text_hex+=$(printf "480fbe%02x" $mod_rm)
             fi
             current_address=$((current_address + 4))
-        elif [[ "$line" =~ ^movsxd[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
+        elif [[ "$line" =~ ^movsxd[[:space:]]+(r[a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
             dst="${BASH_REMATCH[1]}"
             src="${BASH_REMATCH[2]}"
             dst_reg=$(get_reg_num "$dst")
@@ -151,29 +151,6 @@ second_pass() {
                 cmpsq) text_hex+="48a7"; current_address=$((current_address + 2)) ;;
                 cld) text_hex+="fc"; current_address=$((current_address + 1)) ;;
                 std) text_hex+="fd"; current_address=$((current_address + 1)) ;;
-
-            elif [[ "$line" =~ $rep_pattern ]]; then
-                local rep_instr="${BASH_REMATCH[1]}"
-                text_hex+="f3"
-                current_address=$((current_address + 1))
-                case "$rep_instr" in
-                    movsb) text_hex+="a4"; current_address=$((current_address + 1)) ;;
-                    movsw) text_hex+="66a5"; current_address=$((current_address + 2)) ;;
-                    movsl) text_hex+="a5"; current_address=$((current_address + 1)) ;;
-                    movsq) text_hex+="48a5"; current_address=$((current_address + 2)) ;;
-                    stosb) text_hex+="aa"; current_address=$((current_address + 1)) ;;
-                    stosw) text_hex+="66ab"; current_address=$((current_address + 2)) ;;
-                    stosl) text_hex+="ab"; current_address=$((current_address + 1)) ;;
-                    stosq) text_hex+="48ab"; current_address=$((current_address + 2)) ;;
-                    lodsb) text_hex+="ac"; current_address=$((current_address + 1)) ;;
-                    lodsw) text_hex+="66ad"; current_address=$((current_address + 2)) ;;
-                    lodsl) text_hex+="ad"; current_address=$((current_address + 1)) ;;
-                    lodsq) text_hex+="48ad"; current_address=$((current_address + 2)) ;;
-                    scasb) text_hex+="ae"; current_address=$((current_address + 1)) ;;
-                    scasw) text_hex+="66af"; current_address=$((current_address + 2)) ;;
-                    scasl) text_hex+="af"; current_address=$((current_address + 1)) ;;
-                    scasq) text_hex+="48af"; current_address=$((current_address + 2)) ;;
-                esac
             esac
 
         elif [[ "$line" =~ ^mov ]]; then
@@ -182,7 +159,7 @@ second_pass() {
             local src="${mov_operands#*,}"
             dst=$(trim_string "$dst")
             src=$(trim_string "$src")
-            if [[ "$dst" =~ ^[er][a-z]{2}$ && "$src" =~ ^[er][a-z]{2}$ ]]; then
+            if [[ "$dst" =~ ^r[a-z]{2}$ && "$src" =~ ^r[a-z]{2}$ ]]; then
                 
                 mod_rm=$((0xc0 + regs[$src] * 8 + regs[$dst]))
                 text_hex+=$(printf "4889%02x" "$mod_rm")
@@ -291,17 +268,17 @@ second_pass() {
                 cqo) text_hex+="4899"; current_address=$((current_address + 2)) ;;
                 cdqe) text_hex+="4898"; current_address=$((current_address + 2)) ;;
             esac
-        elif [[ "$line" =~ ^xor[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
+        elif [[ "$line" =~ ^xor[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
             reg="${BASH_REMATCH[1]}"
             mod_rm=$((0xc0 + regs[$reg] * 8 + regs[$reg]))
             text_hex+=$(printf "4831%02x" $mod_rm)
             current_address=$((current_address + 3))
-        elif [[ "$line" =~ ^push[[:space:]]+([er][a-z]{2})$ ]]; then
+        elif [[ "$line" =~ ^push[[:space:]]+(r[a-z]{2})$ ]]; then
             reg="${BASH_REMATCH[1]}"
             op=$((0x50 + regs[$reg]))
             text_hex+=$(printf "%02x" $op)
             current_address=$((current_address + 1))
-        elif [[ "$line" =~ ^pop[[:space:]]+([er][a-z]{2})$ ]]; then
+        elif [[ "$line" =~ ^pop[[:space:]]+(r[a-z]{2})$ ]]; then
             reg="${BASH_REMATCH[1]}"
             op=$((0x58 + regs[$reg]))
             text_hex+=$(printf "%02x" $op)
@@ -394,7 +371,7 @@ second_pass() {
             local src="${operands#*,}"
             dst=$(trim_string "$dst")
             src=$(trim_string "$src")
-            if [[ "$dst" =~ ^[er][a-z]{2}$ && "$src" =~ ^[er][a-z]{2}$ ]]; then
+            if [[ "$dst" =~ ^r[a-z]{2}$ && "$src" =~ ^r[a-z]{2}$ ]]; then
                 
                 local reg1="$dst"
                 local reg2="$src"
@@ -527,7 +504,7 @@ second_pass() {
                 current_address=$((current_address + ${#uhex}/2))
             fi
         
-        elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+([er][a-z]{2})$ ]]; then
+        elif [[ "$line" =~ ^(inc|dec|neg|not)[[:space:]]+(r[a-z]{2})$ ]]; then
             op="${BASH_REMATCH[1]}"
             reg="${BASH_REMATCH[2]}"
             op_ext=0
@@ -567,7 +544,7 @@ second_pass() {
             text_hex+=$xhex
             current_address=$((current_address + ${#xhex}/2))
         
-        elif [[ "$line" =~ ^(mul|div|idiv)[[:space:]]+([er][a-z]{2})$ ]]; then
+        elif [[ "$line" =~ ^(mul|div|idiv)[[:space:]]+(r[a-z]{2})$ ]]; then
             op="${BASH_REMATCH[1]}"
             reg="${BASH_REMATCH[2]}"
             op_ext=0
@@ -601,7 +578,7 @@ second_pass() {
                 error_msg "invalid immediate '$i3imm' in imul"
                 return 1
             fi
-            if [[ "$i3src" =~ ^[er][a-z]{2}$ ]]; then
+            if [[ "$i3src" =~ ^r[a-z]{2}$ ]]; then
                 if (( i3val >= -128 && i3val <= 127 )); then
                     local i3mod=$((0xc0 | (regs[$i3dst] << 3) | regs[$i3src]))
                     text_hex+=$(printf "486b%02x%02x" $i3mod $((i3val & 0xff)))
@@ -628,48 +605,18 @@ second_pass() {
                 fi
             fi
         
-        elif [[ "$line" =~ ^imul[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
+        elif [[ "$line" =~ ^imul[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
             reg1="${BASH_REMATCH[1]}"
             reg2="${BASH_REMATCH[2]}"
             mod_rm=$((0xc0 | (regs[$reg1] << 3) | regs[$reg2]))
             text_hex+=$(printf "480faf%02x" $mod_rm)
-
-            elif [[ "$line" =~ $imul_ri_pattern ]]; then
-                local i1reg="${BASH_REMATCH[1]}"
-                local i1imm="${BASH_REMATCH[2]}"
-                local i1val=0
-                if [[ "$i1imm" =~ ^0x([0-9a-fA-F]+)$ ]]; then
-                    i1val=$((16#${BASH_REMATCH[1]}))
-                elif [[ "$i1imm" =~ ^-?[0-9]+$ ]]; then
-                    i1val=$((i1imm))
-                else
-                    error_msg "invalid immediate '$i1imm' in imul"
-                    return 1
-                fi
-                local i1mod=$((0xc0 | (regs[$i1reg] << 3) | regs[$i1reg]))
-                if (( i1val >= -128 && i1val <= 127 )); then
-                    text_hex+=$(printf "486b%02x%02x" $i1mod $((i1val & 0xff)))
-                    current_address=$((current_address + 4))
-                else
-                    text_hex+=$(printf "4869%02x" $i1mod)$(u32le $i1val)
-                    current_address=$((current_address + 7))
-                fi
             current_address=$((current_address + 4))
-        elif [[ "$line" =~ ^lea[[:space:]]+([er][a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
+        elif [[ "$line" =~ ^lea[[:space:]]+(r[a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
             reg="${BASH_REMATCH[1]}"
             lbl="${BASH_REMATCH[2]}"
             mod_rm=$(((regs[$reg] << 3) | 5))
             text_hex+=$(printf "488d%02x" $mod_rm)
             relocations+=("$((current_address + 3)):${lbl}:2:-4")
-
-            elif [[ "$line" =~ $lea_mem_pattern ]]; then
-                local lreg="${BASH_REMATCH[1]}"
-                local lbase="${BASH_REMATCH[2]}"
-                local ldisp="${BASH_REMATCH[3]:-}"
-                local lmem_op="[$lbase$ldisp]"
-                local lhex=$(assemble_mem_operand "$lmem_op" "${regs[$lreg]}" "488d")
-                text_hex+=$lhex
-                current_address=$((current_address + ${#lhex}/2))
             text_hex+="00000000"
             current_address=$((current_address + 7))
         elif [[ "$line" =~ $shift_mem_pattern ]]; then
@@ -690,7 +637,7 @@ second_pass() {
             text_hex+=$(printf "%02x" $((s_val & 0xff)))
             current_address=$((current_address + 1))
         
-        elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+([er][a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
+        elif [[ "$line" =~ ^(shl|shr|sar)[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+)$ ]]; then
             op="${BASH_REMATCH[1]}"
             reg="${BASH_REMATCH[2]}"
             val="${BASH_REMATCH[3]}"
@@ -704,27 +651,14 @@ second_pass() {
             fi
             mod_rm=$((0xc0 | (op_ext << 3) | regs[$reg]))
             text_hex+=$(printf "48c1%02x%02x" $mod_rm $val)
-
-            elif [[ "$line" =~ $shift_cl_pattern ]]; then
-                local clop="${BASH_REMATCH[1]}"
-                local clreg="${BASH_REMATCH[2]}"
-                local cext=0
-                case "$clop" in
-                    shl) cext=4 ;;
-                    shr) cext=5 ;;
-                    sar) cext=7 ;;
-                esac
-                local clmod=$((0xc0 | (cext << 3) | regs[$clreg]))
-                text_hex+=$(printf "48d3%02x" $clmod)
-                current_address=$((current_address + 3))
             current_address=$((current_address + 4))
-        elif [[ "$line" =~ ^test[[:space:]]+([er][a-z]{2}),[[:space:]]+([er][a-z]{2})$ ]]; then
+        elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
             reg1="${BASH_REMATCH[1]}"
             reg2="${BASH_REMATCH[2]}"
             mod_rm=$((0xc0 | (regs[$reg2] << 3) | regs[$reg1]))
             text_hex+=$(printf "4885%02x" $mod_rm)
             current_address=$((current_address + 3))
-        elif [[ "$line" =~ ^test[[:space:]]+([er][a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
+        elif [[ "$line" =~ ^test[[:space:]]+(r[a-z]{2}),[[:space:]]+([0-9]+|0x[0-9a-fA-F]+)$ ]]; then
             reg="${BASH_REMATCH[1]}"
             arg="${BASH_REMATCH[2]}"
             if [[ "$arg" =~ ^0x([0-9a-fA-F]+)$ ]]; then
@@ -735,7 +669,7 @@ second_pass() {
             mod_rm=$((0xc0 | regs[$reg]))
             text_hex+=$(printf "48f7%02x" "$mod_rm")$(u32le "$val")
             current_address=$((current_address + 7))
-        elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|[er][a-z]{2})$ ]]; then
+        elif [[ "$line" =~ ^set(e|ne|a|ae|b|be|g|ge|l|le|z|nz|o|no|s|ns)[[:space:]]+([ab][lh]|[cd][lh]|r[a-z]{2})$ ]]; then
             cond="${BASH_REMATCH[1]}"
             dst="${BASH_REMATCH[2]}"
             dst_reg=$(get_reg_num "$dst")
@@ -762,32 +696,6 @@ second_pass() {
             no) text_hex+=$(printf "0f91%02x" $mod_rm) ;;
             s) text_hex+=$(printf "0f98%02x" $mod_rm) ;;
             ns) text_hex+=$(printf "0f99%02x" $mod_rm) ;;
-
-            elif [[ "$line" =~ $setcc_mem_pattern ]]; then
-                local scond="${BASH_REMATCH[1]}"
-                local sbase="${BASH_REMATCH[3]}"
-                local sdisp="${BASH_REMATCH[4]:-}"
-                local smem_op="[$sbase$sdisp]"
-                local sopcode=""
-                case "$scond" in
-                    e|z) sopcode="0f94" ;;
-                    ne|nz) sopcode="0f95" ;;
-                    a) sopcode="0f97" ;;
-                    ae) sopcode="0f93" ;;
-                    b) sopcode="0f92" ;;
-                    be) sopcode="0f96" ;;
-                    g) sopcode="0f9f" ;;
-                    ge) sopcode="0f9d" ;;
-                    l) sopcode="0f9c" ;;
-                    le) sopcode="0f9e" ;;
-                    o) sopcode="0f90" ;;
-                    no) sopcode="0f91" ;;
-                    s) sopcode="0f98" ;;
-                    ns) sopcode="0f99" ;;
-                esac
-                local shex=$(assemble_mem_operand "$smem_op" "0" "$sopcode")
-                text_hex+=$shex
-                current_address=$((current_address + ${#shex}/2))
             esac
             current_address=$((current_address + 3))
         else
