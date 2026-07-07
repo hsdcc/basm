@@ -6,13 +6,15 @@ generate_relocation_section() {
     local data_labels_ref="$3"
     local rodata_labels_ref="$4"
     local externals_ref="$5"
-    local output_ref="$6"
+    local bss_labels_ref="$6"
+    local output_ref="$7"
     local -n _gr_relocs="$1"
     local -n _gr_labels="$2"
     local -n _gr_data_labels="$3"
     local -n _gr_rodata_labels="$4"
     local -n _gr_externals="$5"
-    local -n _gr_output="$6"
+    local -n _gr_bss_labels="$6"
+    local -n _gr_output="$7"
     _gr_output=""
     local sym_idx=1
     for label_name in "${!_gr_labels[@]}"; do
@@ -24,6 +26,10 @@ generate_relocation_section() {
     done
     local rodata_sym_start=$sym_idx
     for label_name in "${!_gr_rodata_labels[@]}"; do
+        sym_idx=$((sym_idx + 1))
+    done
+    local bss_sym_start=$sym_idx
+    for label_name in "${!_gr_bss_labels[@]}"; do
         sym_idx=$((sym_idx + 1))
     done
     local ext_sym_start=$sym_idx
@@ -49,6 +55,13 @@ generate_relocation_section() {
         if [[ $found -eq 0 ]]; then
             idx=$rodata_sym_start
             for label_name in "${!_gr_rodata_labels[@]}"; do
+                [[ "$label_name" == "$sym_name" ]] && { sym_index=$idx; found=1; break; }
+                idx=$((idx + 1))
+            done
+        fi
+        if [[ $found -eq 0 ]]; then
+            idx=$bss_sym_start
+            for label_name in "${!_gr_bss_labels[@]}"; do
                 [[ "$label_name" == "$sym_name" ]] && { sym_index=$idx; found=1; break; }
                 idx=$((idx + 1))
             done

@@ -80,9 +80,6 @@ linker_emit() {
   local rpad=$((a_r - ro_sz))
   (( rpad > 0 )) && generate_zeros "$rpad" >> "$tmpf"
 
-  # write BSS (zeros)
-  (( bss_sz > 0 )) && generate_zeros "$bss_sz" >> "$tmpf"
-
   chmod +x "$tmpf" && mv -f "$tmpf" "$out" || {
     rm -f "$tmpf"; ctx[error]="failed to write $out"; return 1
   }

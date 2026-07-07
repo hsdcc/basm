@@ -51,7 +51,7 @@ basm_assemble() {
     else
         local tmp_obj
         tmp_obj="$(mktemp).o" || { error_msg "failed to create temp object"; return 1; }
-        generate_elf_object_with_symbols "$text_hex" "$data_bytes" "labels" "equs" "$tmp_obj" "data_label_off" "relocations" "externals" "obj" "$rodata_bytes" "rodata_label_off"
+        generate_elf_object_with_symbols "$text_hex" "$data_bytes" "labels" "equs" "$tmp_obj" "data_label_off" "relocations" "externals" "obj" "$rodata_bytes" "rodata_label_off" "$bss_bytes_len" "bss_label_off"
         link_objects "$tmp_obj" "$outfile"
         local rc=$?
         rm -f "$tmp_obj"

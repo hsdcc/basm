@@ -172,7 +172,7 @@ first_pass() {
                 
                 declare -gA bss_label_off
                 bss_label_off["$name"]=$((${#bss_bytes} / 2))
-                
+                    bss_bytes_len=$((bss_bytes_len + val))
                 bss_bytes+=$(generate_zeros $val)
                 continue
             fi
@@ -189,6 +189,16 @@ first_pass() {
             
             if [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+(r[a-z]{2})$ ]]; then
                 text_bytes_len=$((text_bytes_len + 3))
+            
+            elif [[ "$line" =~ ^mov[[:space:]]+\[(r[a-z]{2})\],[[:space:]]+(r[a-z]{2})$ ]]; then
+                local base="${BASH_REMATCH[1]}"
+                local size=$(calc_mem_addr_size "$base" "")
+                text_bytes_len=$((text_bytes_len + size))
+            
+            elif [[ "$line" =~ ^mov[[:space:]]+(r[a-z]{2}),[[:space:]]+\[(r[a-z]{2})\]$ ]]; then
+                local base="${BASH_REMATCH[2]}"
+                local size=$(calc_mem_addr_size "$base" "")
+                text_bytes_len=$((text_bytes_len + size))
             
             elif [[ "$line" =~ $cmov_pattern ]]; then
                 text_bytes_len=$((text_bytes_len + 4))
