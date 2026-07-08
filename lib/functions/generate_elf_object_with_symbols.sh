@@ -98,7 +98,7 @@ generate_elf_object_with_symbols() {
   local symstrtab_size=$((${#symstrtab_hex} / 2))
   local num_symbols=$((1 + ${#_sym_names[@]}))
   local symtab_size=$((num_symbols * 24))
-  local shstrtab_hex="002e74657874002e64617461002e726f64617461002e627373002e7368737472746162002e73796d746162002e73747274616200"
+  local shstrtab_hex="002e74657874002e64617461002e726f64617461002e627373002e7368737472746162002e73796d746162002e737472746162002e72656c612e7465787400"
   local shstrtab_size=$((${#shstrtab_hex} / 2))
   local rodata_off=$((data_section_off + data_size))
   local strtab_off=$((rodata_off + rodata_size))
@@ -199,7 +199,9 @@ generate_elf_object_with_symbols() {
   sh_flags_hex=$(printf "%016x" $((0x2)))
   section_headers+=$(reverse_endian "$sh_flags_hex")
   section_headers+="0000000000000000"
-  sh_offset_hex=$(printf "%016x" $rodata_off)
+  local rodata_file_off=$rodata_off
+  if ((rodata_size == 0)); then rodata_file_off=0; fi
+  sh_offset_hex=$(printf "%016x" $rodata_file_off)
   section_headers+=$(reverse_endian "$sh_offset_hex")
   sh_size_hex=$(printf "%016x" $rodata_size)
   section_headers+=$(reverse_endian "$sh_size_hex")
@@ -254,7 +256,8 @@ generate_elf_object_with_symbols() {
   section_headers+=$(reverse_endian "$sh_size_hex")
   local link_idx_hex=$(printf "%08x" 7)
   section_headers+=$(reverse_endian "$link_idx_hex")
-  section_headers+="00000000"
+  local sh_info_hex=$(printf "%08x" 1)
+  section_headers+=$(reverse_endian "$sh_info_hex")
   sh_addralign_hex=$(printf "%016x" 8)
   section_headers+=$(reverse_endian "$sh_addralign_hex")
   local entsize_hex=$(printf "%016x" 24)
