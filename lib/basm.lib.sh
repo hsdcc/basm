@@ -2,8 +2,13 @@
 
 _BASM_TOOLS=""
 _BASM_LIB=""
+_basm_dirname() {
+  local p="$1"
+  while [[ "$p" == */ ]]; do p="${p%/}"; done
+  if [[ "$p" != */* ]]; then echo "."; else echo "${p%/*}"; fi
+}
 if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
-  _BASM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd 2>/dev/null)"
+  _BASM_DIR="$(cd "$(_basm_dirname "${BASH_SOURCE[0]}")/.." && pwd 2>/dev/null)"
   _BASM_TOOLS="$_BASM_DIR/tools"
   _BASM_LIB="$_BASM_DIR/lib"
   unset _BASM_DIR
@@ -44,7 +49,7 @@ hex_to_dec() {
 }
 
 # source all function files
-for func_file in "$(dirname "${BASH_SOURCE[0]}")/functions/"*.sh; do
+for func_file in "$(_basm_dirname "${BASH_SOURCE[0]}")/functions/"*.sh; do
   if [[ -f "$func_file" ]]; then
     source "$func_file"
   fi

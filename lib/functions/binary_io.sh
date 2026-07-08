@@ -2,7 +2,7 @@
 
 _READELF_HEX=""
 if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
-  _READELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd 2>/dev/null)"
+  _READELF_DIR="$(cd "$(_basm_dirname "${BASH_SOURCE[0]}")/../.." && pwd 2>/dev/null)"
   _READELF_HEX="$_READELF_DIR/tools/readelf_hex"
   unset _READELF_DIR
 fi

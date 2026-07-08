@@ -300,7 +300,7 @@ generate_elf_object_with_symbols() {
     section_headers+=$(reverse_endian "$rela_entsize_hex")
   fi
   local tmpf
-  tmpf="$(_basm_tempfile "" "$(dirname "$outfile")")" || {
+  tmpf="$(_basm_tempfile "" "$(_basm_dirname "$outfile")")" || {
     error_msg "failed to create temporary file"
     return 1
   }
