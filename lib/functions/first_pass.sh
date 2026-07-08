@@ -6,8 +6,7 @@ first_pass() {
 
   data_bytes=""
   rodata_bytes=""
-  bss_bytes=""
-  text_ins=()
+    text_ins=()
   text_bytes_len=0
   rodata_bytes_len=0
   bss_bytes_len=0
@@ -199,7 +198,6 @@ first_pass() {
         declare -gA bss_label_off
         bss_label_off["$name"]=$bss_bytes_len
         bss_bytes_len=$((bss_bytes_len + val))
-        bss_bytes+=$(generate_zeros $val)
         continue
       fi
       if [[ "$line" =~ $resb_pattern ]]; then
@@ -208,7 +206,6 @@ first_pass() {
         declare -gA bss_label_off
         bss_label_off["$name"]=$bss_bytes_len
         bss_bytes_len=$((bss_bytes_len + val))
-        bss_bytes+=$(generate_zeros $val)
         continue
       fi
       if [[ "$line" =~ $resw_pattern ]]; then
@@ -218,7 +215,6 @@ first_pass() {
         bss_label_off["$name"]=$bss_bytes_len
         total=$((val * 2))
         bss_bytes_len=$((bss_bytes_len + total))
-        bss_bytes+=$(generate_zeros $total)
         continue
       fi
       if [[ "$line" =~ $resd_pattern ]]; then
@@ -228,7 +224,6 @@ first_pass() {
         bss_label_off["$name"]=$bss_bytes_len
         total=$((val * 4))
         bss_bytes_len=$((bss_bytes_len + total))
-        bss_bytes+=$(generate_zeros $total)
         continue
       fi
       if [[ "$line" =~ $resq_pattern ]]; then
@@ -238,7 +233,6 @@ first_pass() {
         bss_label_off["$name"]=$bss_bytes_len
         total=$((val * 8))
         bss_bytes_len=$((bss_bytes_len + total))
-        bss_bytes+=$(generate_zeros $total)
         continue
       fi
       error_msg "at line $line_number: unsupported bss line format: '$line'"
