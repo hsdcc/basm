@@ -139,7 +139,7 @@ calculate_mov_size() {
     local mem="${BASH_REMATCH[1]}"
     local cm_size=$(calc_mem_operand_size "$mem")
     local cm_rex=$(get_rex_for_reg "$dest_reg")
-    [[ -z "$cm_rex" ]] && cm_size=$((cm_size - 1))
+    if [[ -z "$cm_rex" ]] && [[ ! "$mem" =~ (^|[^.a-zA-Z0-9_])r(8|9|1[0-5])([db])?([^.a-zA-Z0-9_]|$) ]]; then cm_size=$((cm_size - 1)); fi
     text_bytes_len=$((text_bytes_len + cm_size))
   elif [[ "$arg" =~ ^\[([^]]+)\],[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5])$ ]]; then
     # [mem], reg
@@ -147,7 +147,7 @@ calculate_mov_size() {
     local cm2_reg="${BASH_REMATCH[2]}"
     local cm2_size=$(calc_mem_operand_size "$mem")
     local cm2_rex=$(get_rex_for_reg "$cm2_reg")
-    [[ -z "$cm2_rex" ]] && cm2_size=$((cm2_size - 1))
+    if [[ -z "$cm2_rex" ]] && [[ ! "$mem" =~ (^|[^.a-zA-Z0-9_])r(8|9|1[0-5])([db])?([^.a-zA-Z0-9_]|$) ]]; then cm2_size=$((cm2_size - 1)); fi
     text_bytes_len=$((text_bytes_len + cm2_size))
   elif [[ "$arg" =~ ^[0-9]+$ ]] || [[ "$arg" =~ ^-?[0-9]+$ ]] || [[ "$arg" =~ ^0x[0-9a-fA-F]+$ ]] || [[ -n "${equs[$arg]:-}" ]]; then
     if ((dreg_num >= 0 && $(get_reg_size "$dest_reg") == 1)); then

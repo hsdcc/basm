@@ -315,7 +315,7 @@ first_pass_ins_size() {
     local ms_src="${BASH_REMATCH[2]}"
     local ms_size=$(calc_mem_operand_size "$mem")
     local ms_rex=$(get_rex_for_reg "$ms_src")
-    [[ -z "$ms_rex" ]] && ms_size=$((ms_size - 1))
+    if [[ -z "$ms_rex" ]] && [[ ! "$mem" =~ (^|[^.a-zA-Z0-9_])r(8|9|1[0-5])([db])?([^.a-zA-Z0-9_]|$) ]]; then ms_size=$((ms_size - 1)); fi
     text_bytes_len=$((text_bytes_len + ms_size))
 
   elif [[ "$line" =~ ^mov[[:space:]]+([er][a-z]{2}|[absd][ilh]|spl|bpl|sil|dil|r[89]|r1[0-5]|r[89]b|r1[0-5]b),[[:space:]]+\[([^]]+)\]$ ]]; then
@@ -323,7 +323,7 @@ first_pass_ins_size() {
     local ml_dst="${BASH_REMATCH[1]}"
     local ml_size=$(calc_mem_operand_size "$mem")
     local ml_rex=$(get_rex_for_reg "$ml_dst")
-    [[ -z "$ml_rex" ]] && ml_size=$((ml_size - 1))
+    if [[ -z "$ml_rex" ]] && [[ ! "$mem" =~ (^|[^.a-zA-Z0-9_])r(8|9|1[0-5])([db])?([^.a-zA-Z0-9_]|$) ]]; then ml_size=$((ml_size - 1)); fi
     text_bytes_len=$((text_bytes_len + ml_size))
 
   elif [[ "$line" =~ $cmov_pattern ]]; then
