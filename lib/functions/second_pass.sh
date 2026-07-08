@@ -309,7 +309,7 @@ second_pass() {
       local dst_reg_num=$(get_reg_num "$dst")
       local src_reg_num=$(get_reg_num "$src")
       if ((dst_reg_num >= 0 && src_reg_num >= 0)); then
-        # mov reg, reg — size depends on destination register
+        # mov reg, reg
         local dst_size=$(($(get_reg_size "$dst")))
         local w_flag=$((dst_size == 8 ? 1 : 0))
         local rex=$(get_rex_bits "$src_reg_num" "$dst_reg_num" "$w_flag")

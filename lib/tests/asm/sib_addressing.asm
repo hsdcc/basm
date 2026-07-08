@@ -10,7 +10,7 @@ _start:
     mov qword [rsp+24], 40
     mov qword [rsp+32], 50
 
-    ; Test 1: [base + index*scale] — access array[idx] with 8-byte elements
+    ; Test 1: [base + index*scale], access array[idx] 8-byte
     lea rsi, [rsp]
     mov rcx, 2         ; index = 2
     mov rax, [rsi + rcx*8]  ; should load 30

@@ -1,4 +1,4 @@
-; touch <path> — create file atomically (O_CREAT|O_EXCL), exit 0 on success, 1 if exists/error
+; touch <path> -- create file (O_CREAT|O_EXCL), exit 0 on success, 1 on error
 section .text
 global _start
 _start:

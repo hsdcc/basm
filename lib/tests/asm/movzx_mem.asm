@@ -13,7 +13,7 @@ _start:
     cmp rax, 0x42
     jne fail
 
-    ; Test movsx reg, byte [mem] — sign extend
+    ; Test movsx reg, byte [mem]
     movsx rbx, byte [rsp]
     cmp rbx, -128
     jne fail

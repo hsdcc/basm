@@ -129,7 +129,7 @@ calc_mem_encoding_size() {
 
   # Displacement
   if [[ -z "$base" && "$has_sib" == "1" ]]; then
-    # index*scale+disp (no base) — always need disp32
+    # index*scale+disp (no base): always need disp32
     size=$((size + 4))
   elif [[ "$base" == "rbp" || "$base" == "ebp" || "$base" == "r13" ]]; then
     if [[ -z "$index" && "$disp" == "0" ]]; then
@@ -224,7 +224,7 @@ assemble_mem_operand() {
         disp_hex=$(u32le "$disp_val")
       fi
       rm=4 # SIB follows
-      # SIB byte: scale|index|base — mask to 3 bits each
+      # SIB byte: scale|index|base, mask to 3 bits
       local sib_val=$((scale_bits << 6 | (index_num & 7) << 3 | (base_num & 7)))
       sib_byte=$(printf "%02x" $sib_val)
     else
@@ -242,7 +242,7 @@ assemble_mem_operand() {
       fi
     fi
   else
-    # Simple [base+disp] form — no SIB
+    # Simple [base+disp] form, no SIB
     [[ -z "$base" ]] && {
       error_msg "empty memory operand"
       return 1

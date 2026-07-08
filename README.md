@@ -1,6 +1,5 @@
-# basm - x86_64 assembler in bash
-
-x86_64 assembler and linker written in bash
+# basm
+x86_64 assembler and linker written in pure bash
 
 ## usage
 
@@ -25,8 +24,5 @@ output defaults to a.out
 
 <details>
 <summary>philosophy</summary>
-
-core assembler uses pure bash - no external tools like sed, awk, grep, cat, etc. only bash built-ins: regex matching, arithmetic, printf for hex conversion.
-
-exceptions: rm, mv, chmod, and tests which can use external tools.
+core assembler uses pure bash,no external tools like sed, awk, grep, cat, etc. only bash built-ins.
 </details>

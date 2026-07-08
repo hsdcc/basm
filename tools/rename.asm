@@ -1,4 +1,4 @@
-; rename <old> <new> — rename file, exit 0 on success, 1 on error
+; rename <old> <new> -- rename file, exit 0 on success, 1 on error
 section .text
 global _start
 _start:

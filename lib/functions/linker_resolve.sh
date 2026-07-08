@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Phase 3: resolve symbols — build final address map, detect duplicates/undef
+# Phase 3: resolve
 linker_resolve() {
   local -n ctx="$1"
   local n="${ctx[num_objects]:-0}"

@@ -1,4 +1,4 @@
-; unlink <path> — remove file, exit 0 on success, 1 on error
+; unlink <path> -- remove file, exit 0 on success, 1 on error
 section .text
 global _start
 _start:

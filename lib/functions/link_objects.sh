@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-# link_objects — linker-descriptor orchestrator
-# Calls phases 1-5 in sequence using linker_ctx
+# link_objects -- linker-descriptor orchestrator
 link_objects() {
     local objects=("$@")
     local output_file="${objects[-1]}"
@@ -30,14 +29,14 @@ link_objects() {
         return 1
     }
 
-    # Phase 2: layout — assign offsets and addresses with alignment
+    # Phase 2: layout
     linker_layout linker_ctx || {
         local err="${linker_ctx[error]:-unknown error}"
         error_msg "linker phase 2 (layout) failed: $err"
         return 1
     }
 
-    # Phase 3: resolve symbols — detect duplicates and undefined
+    # Phase 3: resolve
     linker_resolve linker_ctx || {
         local err="${linker_ctx[error]:-unknown error}"
         error_msg "linker phase 3 (resolve) failed: $err"

@@ -47,7 +47,7 @@ linker_emit() {
     "$rodata_vaddr" "$file_rodata_off" "$rodata_filesz")
 
   local tmpf
-  tmpf="$(_basm_tempfile)" || {
+  tmpf="$(_basm_tempfile "" "$(dirname "$out")")" || {
     ctx[error]="failed to create temp file"
     return 1
   }

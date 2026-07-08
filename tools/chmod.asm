@@ -1,4 +1,4 @@
-; chmod <path> <mode_dec> — set file permissions, exit 0 on success, 1 on error
+; chmod <path> <mode_dec> -- set file perms, exit 0 on success, 1 on error
 section .text
 global _start
 _start:
