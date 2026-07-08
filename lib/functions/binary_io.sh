@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 
+# Resolve path to bundled readelf_hex tool
+_READELF_HEX=""
+if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+  _BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  _READELF_HEX="$_BIN_DIR/tools/readelf_hex"
+fi
+
 # read bytes from file as hex
 read_file_hex() {
   local file_path="$1"
@@ -11,9 +18,13 @@ read_file_hex() {
     if [[ $count_bytes -eq 0 ]]; then
       return 0
     fi
-    local raw
-    raw=$(od -v -An -tx1 -j "$skip_bytes" -N "$count_bytes" "$file_path" 2>/dev/null)
-    _rfh_output="${raw//[[:space:]]/}"
+    if [[ -n "$_READELF_HEX" && -x "$_READELF_HEX" ]]; then
+      _rfh_output=$("$_READELF_HEX" "$file_path" "$skip_bytes" "$count_bytes")
+    else
+      local raw
+      raw=$(od -v -An -tx1 -j "$skip_bytes" -N "$count_bytes" "$file_path" 2>/dev/null)
+      _rfh_output="${raw//[[:space:]]/}"
+    fi
   fi
   return 0
 }
