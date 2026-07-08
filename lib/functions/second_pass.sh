@@ -180,7 +180,11 @@ second_pass() {
         return 1
       fi
       mod_rm=$(build_mod_rm 3 "$dst_reg" "$src_reg")
-      local rex=$(get_rex_for_reg "$dst")
+      local w_flag=0
+      if [[ "$op" == "movsx" ]]; then
+        w_flag=$(($(get_reg_size "$dst") == 8 ? 1 : 0))
+      fi
+      local rex=$(get_rex_bits "$src_reg" "$dst_reg" "$w_flag")
       if [[ "$op" == "movzx" ]]; then
         text_hex+="${rex}0fb6$(printf "%02x" $mod_rm)"
       else
@@ -201,7 +205,7 @@ second_pass() {
         return 1
       fi
       mod_rm=$(build_mod_rm 3 "$dst_reg" "$src_reg")
-      local rex=$(get_rex_for_reg "$dst")
+      local rex=$(get_rex_bits "$src_reg" "$dst_reg" "1")
       text_hex+="${rex}63$(printf "%02x" $mod_rm)"
       current_address=$((current_address + 2 + ${#rex} / 2))
     elif [[ "$line" =~ $string_op_pattern ]]; then
@@ -503,7 +507,8 @@ second_pass() {
           ;;
       esac
       mod_rm=$(build_mod_rm 3 "${regs[$dst]}" "${regs[$src]}")
-      local rex=$(get_rex_for_reg "$dst")
+      local w_flag_cmov=$(($(get_reg_size "$dst") == 8 ? 1 : 0))
+      local rex=$(get_rex_bits "${regs[$src]}" "${regs[$dst]}" "$w_flag_cmov")
       text_hex+="${rex}0f$(printf "%02x%02x" "$cc" "$mod_rm")"
       current_address=$((current_address + 3 + ${#rex} / 2))
     elif [[ "$line" =~ ^(syscall|nop|ret|leave|cqo|cdqe)$ ]]; then
@@ -946,8 +951,8 @@ second_pass() {
         error_msg "invalid immediate '$i3imm' in imul"
         return 1
       fi
-      local rex=$(get_rex_for_reg "$i3dst")
       if [[ "$i3src" =~ ^[er][a-z]{2}$ ]]; then
+        local rex=$(get_rex_bits "${regs[$i3src]}" "${regs[$i3dst]}" "$(($(get_reg_size "$i3dst") == 8 ? 1 : 0))")
         if ((i3val >= -128 && i3val <= 127)); then
           local i3mod=$((0xc0 | (regs[$i3dst] << 3) | regs[$i3src]))
           text_hex+="${rex}6b$(printf "%02x%02x" $i3mod $((i3val & 0xff)))"
@@ -958,6 +963,7 @@ second_pass() {
           current_address=$((current_address + 6 + ${#rex} / 2))
         fi
       else
+        local rex=$(get_rex_for_reg "$i3dst")
         local i3opcode="69"
         if ((i3val >= -128 && i3val <= 127)); then
           i3opcode="6b"
@@ -1000,25 +1006,6 @@ second_pass() {
         text_hex+="00000000"
         current_address=$((current_address + 7))
       fi
-    elif [[ "$line" =~ ^lea[[:space:]]+([er][a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
-      local lr_reg="${BASH_REMATCH[1]}"
-      local lr_lbl="${BASH_REMATCH[2]}"
-      local lr_lbl_num=$(get_reg_num "$lr_lbl")
-      if ((lr_lbl_num >= 0)); then
-        # It'"'"'s a register name, use register form via lea_mem_pattern
-        local lmem_op="[$lr_lbl]"
-        local lrex_lea=$(get_rex_for_mem_operand "$lr_reg" "$lr_lbl"); local lhex=$(assemble_mem_operand "$lmem_op" "${regs[$lr_reg]}" "${lrex_lea}8d")
-        text_hex+=$lhex
-        current_address=$((current_address + ${#lhex} / 2))
-      else
-        local rex_lea=$(get_rex_for_reg "$lr_reg")
-        local mod_rm=$(build_mod_rm 0 "${regs[$lr_reg]}" 5)
-        text_hex+=$(printf "${rex_lea}8d%02x" $mod_rm)
-        relocations+=("$((current_address + 3)):${lr_lbl}:2:-4")
-        text_hex+="00000000"
-        current_address=$((current_address + 7))
-      fi
-
     elif [[ "$line" =~ $lea_mem_pattern ]]; then
       local lreg="${BASH_REMATCH[1]}"
       local lmem_content="${BASH_REMATCH[2]}"
@@ -1065,7 +1052,8 @@ second_pass() {
     elif [[ "$line" =~ ^test[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5]),[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5])$ ]]; then
       reg1="${BASH_REMATCH[1]}"
       reg2="${BASH_REMATCH[2]}"
-      local rex=$(get_rex_for_reg "$reg1")
+      local w_flag_test=$(($(get_reg_size "$reg1") == 8 ? 1 : 0))
+      local rex=$(get_rex_bits "${regs[$reg1]}" "${regs[$reg2]}" "$w_flag_test")
       mod_rm=$(build_mod_rm 3 "${regs[$reg2]}" "${regs[$reg1]}")
       text_hex+="${rex}85$(printf "%02x" $mod_rm)"
       current_address=$((current_address + 2 + ${#rex} / 2))
@@ -1089,11 +1077,8 @@ second_pass() {
         error_msg "at line $line_number: invalid destination register '$dst' in '$line'"
       fi
       mod_rm=$(build_mod_rm 3 0 "$dst_reg")
-      # setcc always operates on byte reg. spl/bpl/sil/dil need REX 40.
-      local rex=""
-      case "$dst" in
-        spl | bpl | sil | dil) rex="40" ;;
-      esac
+      # setcc always operates on byte reg. Extended regs need REX prefix.
+      local rex=$(get_rex_for_reg "$dst")
 
       case "$cond" in
         e | z) text_hex+="${rex}0f94$(printf "%02x" $mod_rm)" ;;
