@@ -18,13 +18,11 @@ read_file_hex() {
     if [[ $count_bytes -eq 0 ]]; then
       return 0
     fi
-    if [[ -n "$_READELF_HEX" && -x "$_READELF_HEX" ]]; then
-      _rfh_output=$("$_READELF_HEX" "$file_path" "$skip_bytes" "$count_bytes")
-    else
-      local raw
-      raw=$(od -v -An -tx1 -j "$skip_bytes" -N "$count_bytes" "$file_path" 2>/dev/null)
-      _rfh_output="${raw//[[:space:]]/}"
+    if [[ ! -x "$_READELF_HEX" ]]; then
+      error_msg "readelf_hex tool not found at $_READELF_HEX"
+      return 1
     fi
+    _rfh_output=$("$_READELF_HEX" "$file_path" "$skip_bytes" "$count_bytes")
   fi
   return 0
 }
