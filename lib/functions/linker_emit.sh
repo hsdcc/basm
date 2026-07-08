@@ -15,9 +15,9 @@ linker_emit() {
   local rh="${ctx[section_rodata_combined_hex]:-}"
   local bss_sz="${ctx[total_bss_size]:-0}"
 
-  local text_sz=$(( ${#texth} / 2 ))
-  local data_sz=$(( ${#datah} / 2 ))
-  local ro_sz=$(( ${#rh} / 2 ))
+  local text_sz=$((${#texth} / 2))
+  local data_sz=$((${#datah} / 2))
+  local ro_sz=$((${#rh} / 2))
 
   local a_t="${ctx[aligned_text_size]:-$text_sz}"
   local a_d="${ctx[aligned_data_size]:-$data_sz}"
@@ -42,46 +42,52 @@ linker_emit() {
   # build ELF header with three PT_LOAD segments
   local hdr
   hdr=$(build_elf_header "$entry" \
-        "$f_off_t" "$vaddr_t" "$a_t" \
-        "$vaddr_d" "$f_off_d" "$data_filesz" "$data_memsz" \
-        "$rodata_vaddr" "$file_rodata_off" "$rodata_filesz")
+    "$f_off_t" "$vaddr_t" "$a_t" \
+    "$vaddr_d" "$f_off_d" "$data_filesz" "$data_memsz" \
+    "$rodata_vaddr" "$file_rodata_off" "$rodata_filesz")
 
-  # create temp file
   local tmpf
-  tmpf="$(mktemp)" || { ctx[error]="failed to create temp file"; return 1; }
+  tmpf="$(_basm_tempfile)" || {
+    ctx[error]="failed to create temp file"
+    return 1
+  }
 
-  # write header
-  hex_to_bin "$hdr" > "$tmpf" || { rm -f "$tmpf"; ctx[error]="header write failed"; return 1; }
+  hex_to_bin "$hdr" >"$tmpf" || {
+    "$_BASM_TOOLS/unlink" "$tmpf" 2>/dev/null
+    ctx[error]="header write failed"
+    return 1
+  }
 
-  # pad to text file offset
-  local hdr_sz=$(( ${#hdr} / 2 ))
-  if (( hdr_sz > f_off_t )); then
-    rm -f "$tmpf"; ctx[error]="header too big ($hdr_sz > $f_off_t)"; return 1
+  local hdr_sz=$((${#hdr} / 2))
+  if ((hdr_sz > f_off_t)); then
+    "$_BASM_TOOLS/unlink" "$tmpf" 2>/dev/null
+    ctx[error]="header too big ($hdr_sz > $f_off_t)"
+    return 1
   fi
-  generate_zeros $((f_off_t - hdr_sz)) >> "$tmpf"
+  generate_zeros $((f_off_t - hdr_sz)) >>"$tmpf"
 
-  # write .text (text segment)
-  [[ -n "$texth" ]] && hex_to_bin "$texth" >> "$tmpf"
+  [[ -n "$texth" ]] && hex_to_bin "$texth" >>"$tmpf"
   local tpad=$((a_t - text_sz))
-  (( tpad > 0 )) && generate_zeros "$tpad" >> "$tmpf"
+  ((tpad > 0)) && generate_zeros "$tpad" >>"$tmpf"
 
-  # pad to data segment file offset
   local after_text=$((f_off_t + a_t))
-  if (( f_off_d > after_text )); then
-    generate_zeros $((f_off_d - after_text)) >> "$tmpf"
+  if ((f_off_d > after_text)); then
+    generate_zeros $((f_off_d - after_text)) >>"$tmpf"
   fi
 
-  # write .data + .rodata (data segment)
-  [[ -n "$datah" ]] && hex_to_bin "$datah" >> "$tmpf"
+  [[ -n "$datah" ]] && hex_to_bin "$datah" >>"$tmpf"
   local dpad=$((a_d - data_sz))
-  (( dpad > 0 )) && generate_zeros "$dpad" >> "$tmpf"
+  ((dpad > 0)) && generate_zeros "$dpad" >>"$tmpf"
 
-  [[ -n "$rh" ]] && hex_to_bin "$rh" >> "$tmpf"
+  [[ -n "$rh" ]] && hex_to_bin "$rh" >>"$tmpf"
   local rpad=$((a_r - ro_sz))
-  (( rpad > 0 )) && generate_zeros "$rpad" >> "$tmpf"
+  ((rpad > 0)) && generate_zeros "$rpad" >>"$tmpf"
 
-  chmod +x "$tmpf" && mv -f "$tmpf" "$out" || {
-    rm -f "$tmpf"; ctx[error]="failed to write $out"; return 1
+  "$_BASM_TOOLS/chmod" "$tmpf" 493 2>/dev/null
+  "$_BASM_TOOLS/rename" "$tmpf" "$out" 2>/dev/null || {
+    "$_BASM_TOOLS/unlink" "$tmpf" 2>/dev/null
+    ctx[error]="failed to write $out"
+    return 1
   }
 
   return 0
