@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 
 _BASM_TOOLS=""
+_BASM_LIB=""
 if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
   _BASM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd 2>/dev/null)"
   _BASM_TOOLS="$_BASM_DIR/tools"
+  _BASM_LIB="$_BASM_DIR/lib"
   unset _BASM_DIR
 fi
 

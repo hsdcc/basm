@@ -55,7 +55,26 @@ basm_assemble() {
       return 1
     }
     generate_elf_object_with_symbols "$text_hex" "$data_bytes" "labels" "equs" "$tmp_obj" "data_label_off" "relocations" "externals" "obj" "$rodata_bytes" "rodata_label_off" "$bss_bytes_len" "bss_label_off"
-    link_objects "$tmp_obj" "$outfile"
+
+    # Build runtime objects if needed
+    local lib_o="$_BASM_LIB/libc.o"
+    local crt_o="$_BASM_LIB/crt.o"
+    if [[ ! -f "$lib_o" ]]; then
+      bash "$_BASM_LIB/../src/basm.sh" "$_BASM_LIB/libc.asm" "$lib_o" obj 2>/dev/null
+    fi
+    if [[ ! -f "$crt_o" ]]; then
+      bash "$_BASM_LIB/../src/basm.sh" "$_BASM_LIB/crt.asm" "$crt_o" obj 2>/dev/null
+    fi
+
+    # Link with runtime objects
+    local has_start=0
+    [[ -n "${labels[_start]:-}" ]] && has_start=1
+
+    if ((has_start)); then
+      link_objects "$tmp_obj" "$lib_o" "$outfile"
+    else
+      link_objects "$crt_o" "$tmp_obj" "$lib_o" "$outfile"
+    fi
     local rc=$?
     "$_BASM_TOOLS/unlink" "$tmp_obj" 2>/dev/null
     return $rc

@@ -983,25 +983,31 @@ second_pass() {
     elif [[ "$line" =~ ^imul[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5]),[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5])$ ]]; then
       reg1="${BASH_REMATCH[1]}"
       reg2="${BASH_REMATCH[2]}"
-      local w_flag=$(( $(get_reg_size "$reg1") == 8 ? 1 : 0 ))
-          local rex=$(get_rex_bits "${regs[$reg2]}" "${regs[$reg1]}" "$w_flag")
+      local w_flag=$(($(get_reg_size "$reg1") == 8 ? 1 : 0))
+      local rex=$(get_rex_bits "${regs[$reg2]}" "${regs[$reg1]}" "$w_flag")
       mod_rm=$(build_mod_rm 3 "${regs[$reg1]}" "${regs[$reg2]}")
       text_hex+="${rex}0faf$(printf "%02x" $mod_rm)"
       current_address=$((current_address + 3 + ${#rex} / 2))
-    elif [[ "$line" =~ ^lea[[:space:]]+([er][a-z]{2}),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
+    elif [[ "$line" =~ ^lea[[:space:]]+([er][a-z]{2}|r[89]|r1[0-5]),[[:space:]]+\[([a-zA-Z0-9_]+)\]$ ]]; then
       reg="${BASH_REMATCH[1]}"
       lbl="${BASH_REMATCH[2]}"
       local l_lbl_num=$(get_reg_num "$lbl")
       if ((l_lbl_num >= 0)); then
         # It's a register, use register form
         local lmem_op="[$lbl]"
-        local lrex_lea=$(get_rex_for_mem_operand "$reg" "$lbl"); local lhex=$(assemble_mem_operand "$lmem_op" "${regs[$reg]}" "${lrex_lea}8d")
+        local lrex_lea=$(get_rex_for_mem_operand "$reg" "$lbl")
+        local lhex=$(assemble_mem_operand "$lmem_op" "${regs[$reg]}" "${lrex_lea}8d")
         text_hex+=$lhex
         current_address=$((current_address + ${#lhex} / 2))
       else
-        local rex_lea=$(get_rex_for_reg "$reg")
+        local lea_reg_num=${regs[$reg]}
+        local lea_r_bit=$(((lea_reg_num >> 3) & 1))
+        local lea_w_flag=$(($(get_reg_size "$reg") == 8 ? 1 : 0))
+        local lea_rex_code=$((0x40 | (lea_w_flag << 3) | (lea_r_bit << 2)))
+        local lea_rex=
+        if ((lea_rex_code == 0x40)); then lea_rex=""; else lea_rex=$(printf "%02x" $lea_rex_code); fi
         mod_rm=$(build_mod_rm 0 "${regs[$reg]}" 5)
-        text_hex+=$(printf "${rex_lea}8d%02x" $mod_rm)
+        text_hex+=$(printf "${lea_rex}8d%02x" $mod_rm)
         relocations+=("$((current_address + 3)):${lbl}:2:-4")
         text_hex+="00000000"
         current_address=$((current_address + 7))
