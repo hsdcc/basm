@@ -1,30 +1,30 @@
 #!/usr/bin/env bash
 
-# Resolve path to bundled readelf_hex tool
 _READELF_HEX=""
 if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
-  _BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-  _READELF_HEX="$_BIN_DIR/tools/readelf_hex"
+  _READELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd 2>/dev/null)"
+  _READELF_HEX="$_READELF_DIR/tools/readelf_hex"
+  unset _READELF_DIR
 fi
 
-# read bytes from file as hex
 read_file_hex() {
   local file_path="$1"
   local skip_bytes="$2"
   local count_bytes="$3"
   local -n _rfh_output="$4"
   _rfh_output=""
-  if [[ -f "$file_path" ]]; then
-    if [[ $count_bytes -eq 0 ]]; then
-      return 0
-    fi
-    if [[ ! -x "$_READELF_HEX" ]]; then
-      error_msg "readelf_hex tool not found at $_READELF_HEX"
-      return 1
-    fi
-    _rfh_output=$("$_READELF_HEX" "$file_path" "$skip_bytes" "$count_bytes")
+  if [[ ! -f "$file_path" ]]; then
+    error_msg "file not found: $file_path"
+    return 1
   fi
-  return 0
+  if [[ $count_bytes -eq 0 ]]; then
+    return 0
+  fi
+  if [[ ! -x "$_READELF_HEX" ]]; then
+    error_msg "readelf_hex tool not found at $_READELF_HEX"
+    return 1
+  fi
+  _rfh_output=$("$_READELF_HEX" "$file_path" "$skip_bytes" "$count_bytes") || return $?
 }
 
 read_string_at() {
